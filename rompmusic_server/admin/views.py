@@ -63,6 +63,11 @@ async def admin_login(
     return response
 
 
+def _api_base() -> str:
+    """Base URL for API - same origin as server."""
+    return "/api/v1"
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(
     request: Request,
@@ -84,6 +89,7 @@ async def admin_dashboard(
             "albums_count": albums_count,
             "tracks_count": tracks_count,
             "users_count": users_count,
+            "api_base": _api_base(),
         },
     )
 

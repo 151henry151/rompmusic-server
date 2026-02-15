@@ -96,7 +96,132 @@
             btn.disabled = false;
         }
     }
+
+    const API_BASE = '{{ api_base }}';
+    const CLIENT_SETTING_LABELS = {
+        display_albums_without_artwork: 'Display albums without artwork',
+        display_artists_without_artwork: 'Display artists without artwork',
+        group_artists_by_capitalization: 'Group artists with different capitalization',
+        group_collaborations_by_primary: 'Group collaborations by primary artist',
+        audio_format: 'Audio quality (format)',
+    };
+
+    async function loadClientConfig() {
+        const loading = document.getElementById('client-config-loading');
+        const form = document.getElementById('client-config-form');
+        const tbody = document.getElementById('client-config-body');
+        try {
+            const resp = await fetch(API_BASE + '/admin/client-config', { credentials: 'same-origin' });
+            if (!resp.ok) throw new Error(resp.status);
+            const data = await resp.json();
+            const cfg = data.client_settings || data;
+            tbody.innerHTML = '';
+            for (const [key, val] of Object.entries(cfg)) {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #334155';
+                const label = CLIENT_SETTING_LABELS[key] || key;
+                let defaultCell = '';
+                if (key === 'audio_format') {
+                    defaultCell = '<select name="default_' + key + '"><option value="original"' + (val.default === 'original' ? ' selected' : '') + '>original</option><option value="ogg"' + (val.default === 'ogg' ? ' selected' : '') + '>ogg</option></select>';
+                } else {
+                    defaultCell = '<select name="default_' + key + '"><option value="false"' + (val.default === false ? ' selected' : '') + '>Off</option><option value="true"' + (val.default === true ? ' selected' : '') + '>On</option></select>';
+                }
+                row.innerHTML = '<td style="padding: 0.5rem 0;">' + label + '</td>' +
+                    '<td style="padding: 0.5rem 0;"><input type="checkbox" name="visible_' + key + '" ' + (val.visible ? 'checked' : '') + '></td>' +
+                    '<td style="padding: 0.5rem 0;">' + defaultCell + '</td>';
+                tbody.appendChild(row);
+            }
+            loading.style.display = 'none';
+            form.style.display = 'block';
+        } catch (e) {
+            loading.innerHTML = '<span style="color: #f87171;">Failed to load: ' + e.message + '</span>';
+        }
+    }
+
+    function setupClientConfigForm() {
+        document.getElementById('client-config-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const msg = document.getElementById('client-config-msg');
+        const cfg = {};
+        for (const key of Object.keys(CLIENT_SETTING_LABELS)) {
+            const visInput = form.querySelector('[name="visible_' + key + '"]');
+            const defInput = form.querySelector('[name="default_' + key + '"]');
+            if (visInput && defInput) {
+                const defVal = defInput.tagName === 'SELECT' ? defInput.value : defInput.value === 'true';
+                cfg[key] = { visible: visInput.checked, default: key === 'audio_format' ? defVal : defVal === 'true', allowed: ['original', 'ogg'] };
+            }
+        }
+        try {
+            const resp = await fetch(API_BASE + '/admin/client-config', {
+                method: 'PUT',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ client_settings: cfg }),
+            });
+            if (!resp.ok) throw new Error(resp.status);
+            msg.innerHTML = '<span style="color: #4ade80;">Saved.</span>';
+            setTimeout(function() { msg.innerHTML = ''; }, 2000);
+        } catch (err) {
+            msg.innerHTML = '<span style="color: #f87171;">Save failed: ' + err.message + '</span>';
+        }
+    });
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        loadClientConfig();
+        setupClientConfigForm();
+    });
     </script>
+
+    <div class="card">
+        <h2>Client Settings Policy</h2>
+        <p style="color: #94a3b8; font-size: 0.9rem;">Control which settings are visible to app users and their defaults. When hidden, the default applies to all users.</p>
+        <div id="client-config-loading" style="color: #94a3b8;">Loading...</div>
+        <form id="client-config-form" style="display: none; margin-top: 1rem;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                <thead>
+                    <tr style="border-bottom: 1px solid #334155;">
+                        <th style="text-align: left; padding: 0.5rem 0;">Setting</th>
+                        <th style="text-align: left; padding: 0.5rem 0;">Visible to users</th>
+                        <th style="text-align: left; padding: 0.5rem 0;">Default</th>
+                    </tr>
+                </thead>
+                <tbody id="client-config-body"></tbody>
+            </table>
+            <p style="margin-top: 1rem;">
+                <button type="submit">Save</button>
+                <span id="client-config-msg" style="margin-left: 1rem;"></span>
+            </p>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>Quick Links</h2>
+        <p><a href="/api/docs">API Documentation (Swagger)</a></p>
+        <p><a href="/api/redoc">API Documentation (ReDoc)</a></p>
+    </div>
+</div>
+{% endblock %}
+l which settings are visible to app users and their defaults. When hidden, the default applies to all users.</p>
+        <div id="client-config-loading" style="color: #94a3b8;">Loading...</div>
+        <form id="client-config-form" style="display: none; margin-top: 1rem;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                <thead>
+                    <tr style="border-bottom: 1px solid #334155;">
+                        <th style="text-align: left; padding: 0.5rem 0;">Setting</th>
+                        <th style="text-align: left; padding: 0.5rem 0;">Visible to users</th>
+                        <th style="text-align: left; padding: 0.5rem 0;">Default</th>
+                    </tr>
+                </thead>
+                <tbody id="client-config-body"></tbody>
+            </table>
+            <p style="margin-top: 1rem;">
+                <button type="submit">Save</button>
+                <span id="client-config-msg" style="margin-left: 1rem;"></span>
+            </p>
+        </form>
+    </div>
 
     <div class="card">
         <h2>Quick Links</h2>
