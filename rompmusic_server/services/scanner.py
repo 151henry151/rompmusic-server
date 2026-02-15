@@ -5,7 +5,7 @@
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from mutagen import File as MutagenFile
 from mutagen.flac import FLAC
@@ -98,10 +98,23 @@ def _get_tag(tags: Any, keys: list[str]) -> str | None:
     return None
 
 
-async def scan_library(session: AsyncSession) -> dict[str, int]:
-    """Scan the music directory and update the database. Returns counts."""
+async def scan_library(
+    session: AsyncSession,
+    on_progress: Callable[[int, int, str | None, int, int, int], None] | None = None,
+) -> dict[str, int]:
+    """Scan the music directory and update the database. Returns counts.
+
+    If on_progress is provided, it is called as:
+        on_progress(processed, total, current_file, artists, albums, tracks)
+    """
     music_path = Path(settings.music_path)
+
+    if on_progress:
+        on_progress(0, 0, "Opening music directory...", 0, 0, 0)
+
     if not music_path.exists():
+        if on_progress:
+            on_progress(0, 0, "Error: Music directory does not exist", 0, 0, 0)
         return {"artists": 0, "albums": 0, "tracks": 0}
 
     artists_map: dict[str, int] = {}
@@ -111,6 +124,13 @@ async def scan_library(session: AsyncSession) -> dict[str, int]:
     new_albums = 0
     new_tracks = 0
 
+    if on_progress:
+        on_progress(
+            0, 0,
+            "Discovering files (searching for .mp3, .flac, .m4a, .ogg, .oga, .opus)...",
+            0, 0, 0,
+        )
+
     def walk_files() -> list[Path]:
         files = []
         for ext in SUPPORTED_EXTENSIONS:
@@ -119,14 +139,29 @@ async def scan_library(session: AsyncSession) -> dict[str, int]:
 
     loop = asyncio.get_event_loop()
     files = await loop.run_in_executor(None, walk_files)
+    total = len(files)
 
-    for file_path in files:
+    if on_progress:
+        on_progress(
+            0, total,
+            f"Found {total} files. Extracting metadata and building library..." if total else "No files found",
+            0, 0, 0,
+        )
+
+    if total == 0:
+        return {"artists": 0, "albums": 0, "tracks": 0}
+
+    for idx, file_path in enumerate(files):
         rel_path = str(file_path.relative_to(music_path))
         if rel_path in seen_tracks:
+            if on_progress:
+                on_progress(idx + 1, total, rel_path[:60] + ("..." if len(rel_path) > 60 else ""), len(artists_map), len(albums_map), len(seen_tracks))
             continue
 
         meta = await loop.run_in_executor(None, extract_metadata, file_path)
         if not meta:
+            if on_progress:
+                on_progress(idx + 1, total, rel_path[:60] + ("..." if len(rel_path) > 60 else ""), len(artists_map), len(albums_map), len(seen_tracks))
             continue
 
         artist_name = meta["artist"] or "Unknown Artist"
@@ -184,7 +219,28 @@ async def scan_library(session: AsyncSession) -> dict[str, int]:
 
         seen_tracks.add(rel_path)
 
+        if on_progress:
+            on_progress(
+                idx + 1,
+                total,
+                rel_path[:60] + ("..." if len(rel_path) > 60 else ""),
+                len(artists_map),
+                len(albums_map),
+                len(seen_tracks),
+            )
+
+    if on_progress and total > 0:
+        on_progress(
+            total, total, "Committing...", len(artists_map), len(albums_map), len(seen_tracks)
+        )
+
     await session.commit()
+
+    if on_progress and total > 0:
+        on_progress(
+            total, total, "Complete", len(artists_map), len(albums_map), len(seen_tracks)
+        )
+
     return {
         "artists": len(artists_map),
         "albums": len(albums_map),

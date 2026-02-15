@@ -5,14 +5,15 @@
 
 from pathlib import Path
 
+import json
+
 from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from rompmusic_server.auth import create_access_token, verify_password
+from rompmusic_server.auth import create_access_token, get_current_user_id, verify_password
 from rompmusic_server.database import get_db
 from rompmusic_server.models import Album, Artist, Track, User
 from rompmusic_server.services.scanner import scan_library
@@ -93,9 +94,55 @@ async def admin_trigger_scan(
     _user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Trigger library scan. Returns HTML partial for HTMX."""
+    """Trigger library scan. Returns HTML partial for HTMX (non-streaming fallback)."""
     counts = await scan_library(db)
     return templates.TemplateResponse(
         "partials/scan_result.html",
         {"request": request, "counts": counts},
+    )
+
+
+@router.post("/scan/stream")
+async def admin_trigger_scan_stream(
+    _user: User = Depends(require_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream scan progress via Server-Sent Events."""
+
+    async def event_generator():
+        import asyncio
+
+        queue: asyncio.Queue = asyncio.Queue()
+
+        def on_progress(processed, total, current_file, artists, albums, tracks):
+            queue.put_nowait({
+                "processed": processed,
+                "total": total,
+                "current_file": current_file,
+                "artists": artists,
+                "albums": albums,
+                "tracks": tracks,
+            })
+
+        async def run_scan():
+            await scan_library(db, on_progress=on_progress)
+            queue.put_nowait(None)
+
+        task = asyncio.create_task(run_scan())
+
+        while True:
+            item = await queue.get()
+            if item is None:
+                yield f"data: {json.dumps({'done': True})}\n\n"
+                break
+            yield f"data: {json.dumps(item)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
