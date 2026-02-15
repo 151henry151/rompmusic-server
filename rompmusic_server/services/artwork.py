@@ -13,6 +13,11 @@ from mutagen.mp4 import MP4
 from mutagen.flac import FLAC
 
 
+def has_artwork_in_file(file_path: Path) -> bool:
+    """Check if a music file has embedded artwork. Lightweight check for metadata quality."""
+    return extract_artwork_from_file(file_path) is not None
+
+
 def extract_artwork_from_file(file_path: Path) -> tuple[bytes, str] | None:
     """
     Extract embedded album artwork from a music file.

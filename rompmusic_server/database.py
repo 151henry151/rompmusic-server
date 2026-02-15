@@ -40,5 +40,14 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """Create all tables. Call at startup."""
+    from sqlalchemy import text
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Migration: add has_artwork to albums if missing (for home quality filtering)
+        try:
+            await conn.execute(text("""
+                ALTER TABLE albums ADD COLUMN IF NOT EXISTS has_artwork BOOLEAN DEFAULT NULL
+            """))
+        except Exception:
+            pass  # Column may already exist or DB doesn't support IF NOT EXISTS

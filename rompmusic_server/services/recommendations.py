@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from rompmusic_server.config import settings
 from rompmusic_server.models import Album, Artist, PlayHistory, Track
+from rompmusic_server.services.metadata_quality import is_home_quality_track
 
 logger = logging.getLogger(__name__)
 
@@ -296,26 +297,42 @@ async def get_recommended_tracks(
                 combined[t.id] = combined.get(t.id, 0) + weight
 
     if not combined:
-        # No history: return recently added
+        # No history: return recently added (filtered for home quality)
         q = (
-            select(Track, Album.title, Artist.name)
+            select(Track, Album.title, Artist.name, Album.has_artwork)
             .join(Album, Track.album_id == Album.id)
             .join(Artist, Track.artist_id == Artist.id)
             .order_by(desc(Track.created_at))
-            .limit(limit)
+            .limit(limit * 5)
         )
         result = await db.execute(q)
-        return list(result.all())
+        rows = result.all()
+        out = []
+        for t, at, an, has_art in rows:
+            if is_home_quality_track(t.title, has_art):
+                out.append((t, at, an))
+                if len(out) >= limit:
+                    break
+        return out
 
-    sorted_ids = sorted(combined.items(), key=lambda x: -x[1])[:limit]
+    sorted_ids = sorted(combined.items(), key=lambda x: -x[1])[:limit * 3]
     track_ids = [tid for tid, _ in sorted_ids]
 
     q = (
-        select(Track, Album.title, Artist.name)
+        select(Track, Album.title, Artist.name, Album.has_artwork)
         .join(Album, Track.album_id == Album.id)
         .join(Artist, Track.artist_id == Artist.id)
         .where(Track.id.in_(track_ids))
     )
     result = await db.execute(q)
-    by_id = {t.id: (t, at, an) for t, at, an in result.all()}
-    return [(by_id[tid][0], by_id[tid][1], by_id[tid][2]) for tid in track_ids if tid in by_id]
+    by_id = {t.id: (t, at, an, has_art) for t, at, an, has_art in result.all()}
+    out = []
+    for tid in track_ids:
+        if tid not in by_id:
+            continue
+        t, at, an, has_art = by_id[tid]
+        if is_home_quality_track(t.title, has_art):
+            out.append((t, at, an))
+            if len(out) >= limit:
+                break
+    return out

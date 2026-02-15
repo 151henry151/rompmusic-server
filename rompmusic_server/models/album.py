@@ -3,7 +3,7 @@
 
 """Album model."""
 
-from sqlalchemy import ForeignKey, Integer, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from rompmusic_server.models.base import Base
@@ -20,6 +20,7 @@ class Album(Base, TimestampMixin):
     artist_id: Mapped[int] = mapped_column(ForeignKey("artists.id"), nullable=False)
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     artwork_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    has_artwork: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
     beets_id: Mapped[int | None] = mapped_column(Integer, unique=True, nullable=True, index=True)
 
     artist: Mapped["Artist"] = relationship("Artist", back_populates="albums")

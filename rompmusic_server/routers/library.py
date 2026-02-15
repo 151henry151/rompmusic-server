@@ -11,22 +11,36 @@ from rompmusic_server.auth import get_current_user_id, get_optional_user_id
 from rompmusic_server.database import get_db
 from rompmusic_server.models import Album, Artist, PlayHistory, Track
 from rompmusic_server.api.schemas import AlbumResponse, ArtistResponse, TrackResponse
+from rompmusic_server.services.metadata_quality import is_home_quality_track
 
 router = APIRouter(prefix="/library", tags=["library"])
+
+
+def _artist_order(q, sort_by: str, order: str):
+    """Apply sort to artist query."""
+    from sqlalchemy import asc
+    col = Artist.name if sort_by == "name" else Artist.created_at
+    return q.order_by(desc(col) if order == "desc" else asc(col))
 
 
 @router.get("/artists", response_model=list[ArtistResponse])
 async def list_artists(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=500),
     search: str | None = Query(None),
+    home: bool = Query(False, description="Home page: only artists with albums that have artwork"),
+    sort_by: str = Query("name", description="Sort: name, date_added"),
+    order: str = Query("asc", description="Order: asc, desc"),
     db: AsyncSession = Depends(get_db),
 ) -> list[ArtistResponse]:
-    """List artists with optional search."""
+    """List artists with optional search and sort."""
     q = select(Artist)
     if search:
         q = q.where(Artist.name.ilike(f"%{search}%"))
-    q = q.order_by(Artist.name).offset(skip).limit(limit)
+    if home:
+        q = q.join(Album, Album.artist_id == Artist.id).where(Album.has_artwork == True)
+        q = q.distinct()
+    q = _artist_order(q, sort_by, order).offset(skip).limit(limit)
     result = await db.execute(q)
     artists = result.scalars().all()
     return [ArtistResponse.model_validate(a) for a in artists]
@@ -46,21 +60,37 @@ async def get_artist(
     return ArtistResponse.model_validate(artist)
 
 
+def _album_order(q, sort_by: str, order: str):
+    """Apply sort to album query. q must have Album and Artist joined."""
+    from sqlalchemy import asc
+    if sort_by == "year":
+        col = Album.year
+    elif sort_by == "date_added":
+        col = Album.created_at
+    elif sort_by == "artist":
+        col = Artist.name
+    else:  # title
+        col = Album.title
+    return q.order_by(desc(col).nullslast() if order == "desc" else asc(col).nullslast())
+
+
 @router.get("/albums", response_model=list[AlbumResponse])
 async def list_albums(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=500),
     artist_id: int | None = Query(None),
     search: str | None = Query(None),
+    sort_by: str = Query("year", description="Sort: year, date_added, artist, title"),
+    order: str = Query("desc", description="Order: asc, desc"),
     db: AsyncSession = Depends(get_db),
 ) -> list[AlbumResponse]:
-    """List albums with optional filters."""
+    """List albums with optional filters and sort."""
     q = select(Album, Artist.name).join(Artist, Album.artist_id == Artist.id)
     if artist_id:
         q = q.where(Album.artist_id == artist_id)
     if search:
         q = q.where(Album.title.ilike(f"%{search}%"))
-    q = q.order_by(Album.year.desc().nullslast(), Album.title).offset(skip).limit(limit)
+    q = _album_order(q, sort_by, order).offset(skip).limit(limit)
     result = await db.execute(q)
     rows = result.all()
     from sqlalchemy import func
@@ -76,6 +106,7 @@ async def list_albums(
                 year=a.year,
                 artwork_path=a.artwork_path,
                 track_count=tc or 0,
+                created_at=a.created_at,
             )
         )
     return out
@@ -106,21 +137,40 @@ async def get_album(
         year=album.year,
         artwork_path=album.artwork_path,
         track_count=track_count,
+        created_at=album.created_at,
     )
+
+
+def _track_order(q, sort_by: str, order: str):
+    """Apply sort to track query. q must have Track, Album, Artist."""
+    from sqlalchemy import asc
+    if sort_by == "year":
+        col = Album.year
+    elif sort_by == "date_added":
+        col = Track.created_at
+    elif sort_by == "artist":
+        col = Artist.name
+    elif sort_by == "album":
+        col = Album.title
+    else:  # title
+        col = Track.title
+    return q.order_by(desc(col).nullslast() if order == "desc" else asc(col).nullslast())
 
 
 @router.get("/tracks", response_model=list[TrackResponse])
 async def list_tracks(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=1000),
     album_id: int | None = Query(None),
     artist_id: int | None = Query(None),
     search: str | None = Query(None),
+    sort_by: str = Query("title", description="Sort: year, date_added, artist, album, title"),
+    order: str = Query("asc", description="Order: asc, desc"),
     db: AsyncSession = Depends(get_db),
 ) -> list[TrackResponse]:
-    """List tracks with optional filters."""
+    """List tracks with optional filters and sort."""
     q = (
-        select(Track, Album.title, Artist.name)
+        select(Track, Album.title, Artist.name, Album.year)
         .join(Album, Track.album_id == Album.id)
         .join(Artist, Track.artist_id == Artist.id)
     )
@@ -130,7 +180,7 @@ async def list_tracks(
         q = q.where(Track.artist_id == artist_id)
     if search:
         q = q.where(Track.title.ilike(f"%{search}%"))
-    q = q.order_by(Track.album_id, Track.disc_number, Track.track_number).offset(skip).limit(limit)
+    q = _track_order(q, sort_by, order).offset(skip).limit(limit)
     result = await db.execute(q)
     rows = result.all()
     return [
@@ -146,9 +196,46 @@ async def list_tracks(
             duration=t.duration,
             bitrate=t.bitrate,
             format=t.format,
+            year=yr,
+            created_at=t.created_at,
         )
-        for t, at, an in rows
+        for t, at, an, yr in rows
     ]
+
+
+def _filter_home_quality(
+    rows: list[tuple], limit: int
+) -> list[TrackResponse]:
+    """Filter to home-quality tracks (has artwork, real titles) and build responses."""
+    from rompmusic_server.api.schemas import TrackResponse
+
+    out = []
+    for item in rows:
+        if len(item) == 4:
+            t, at, an, has_art = item
+        else:
+            t, at, an = item
+            has_art = None
+        if not is_home_quality_track(t.title, has_art):
+            continue
+        out.append(
+            TrackResponse(
+                id=t.id,
+                title=t.title,
+                album_id=t.album_id,
+                artist_id=t.artist_id,
+                album_title=at,
+                artist_name=an,
+                track_number=t.track_number,
+                disc_number=t.disc_number,
+                duration=t.duration,
+                bitrate=t.bitrate,
+                format=t.format,
+            )
+        )
+        if len(out) >= limit:
+            break
+    return out
 
 
 @router.get("/tracks/recently-added", response_model=list[TrackResponse])
@@ -156,32 +243,17 @@ async def list_recently_added_tracks(
     limit: int = Query(20, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
 ) -> list[TrackResponse]:
-    """List most recently added tracks (by created_at)."""
+    """List most recently added tracks (by created_at). Home page: only quality metadata."""
     q = (
-        select(Track, Album.title, Artist.name)
+        select(Track, Album.title, Artist.name, Album.has_artwork)
         .join(Album, Track.album_id == Album.id)
         .join(Artist, Track.artist_id == Artist.id)
         .order_by(Track.created_at.desc())
-        .limit(limit)
+        .limit(limit * 5)
     )
     result = await db.execute(q)
     rows = result.all()
-    return [
-        TrackResponse(
-            id=t.id,
-            title=t.title,
-            album_id=t.album_id,
-            artist_id=t.artist_id,
-            album_title=at,
-            artist_name=an,
-            track_number=t.track_number,
-            disc_number=t.disc_number,
-            duration=t.duration,
-            bitrate=t.bitrate,
-            format=t.format,
-        )
-        for t, at, an in rows
-    ]
+    return _filter_home_quality(rows, limit)
 
 
 @router.get("/tracks/recently-played", response_model=list[TrackResponse])
@@ -190,38 +262,23 @@ async def list_recently_played_tracks(
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> list[TrackResponse]:
-    """List user's recently played tracks."""
+    """List user's recently played tracks. Home page: only quality metadata."""
     subq = (
         select(PlayHistory.track_id, func.max(PlayHistory.played_at).label("last_played"))
         .where(PlayHistory.user_id == user_id)
         .group_by(PlayHistory.track_id)
     ).subquery()
     q = (
-        select(Track, Album.title, Artist.name)
+        select(Track, Album.title, Artist.name, Album.has_artwork)
         .join(Album, Track.album_id == Album.id)
         .join(Artist, Track.artist_id == Artist.id)
         .join(subq, Track.id == subq.c.track_id)
         .order_by(desc(subq.c.last_played))
-        .limit(limit)
+        .limit(limit * 5)
     )
     result = await db.execute(q)
     rows = result.all()
-    return [
-        TrackResponse(
-            id=t.id,
-            title=t.title,
-            album_id=t.album_id,
-            artist_id=t.artist_id,
-            album_title=at,
-            artist_name=an,
-            track_number=t.track_number,
-            disc_number=t.disc_number,
-            duration=t.duration,
-            bitrate=t.bitrate,
-            format=t.format,
-        )
-        for t, at, an in rows
-    ]
+    return _filter_home_quality(rows, limit)
 
 
 @router.get("/tracks/frequently-played", response_model=list[TrackResponse])
@@ -230,38 +287,23 @@ async def list_frequently_played_tracks(
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> list[TrackResponse]:
-    """List user's most frequently played tracks."""
+    """List user's most frequently played tracks. Home page: only quality metadata."""
     subq = (
         select(PlayHistory.track_id, func.count(PlayHistory.id).label("play_count"))
         .where(PlayHistory.user_id == user_id)
         .group_by(PlayHistory.track_id)
     ).subquery()
     q = (
-        select(Track, Album.title, Artist.name)
+        select(Track, Album.title, Artist.name, Album.has_artwork)
         .join(Album, Track.album_id == Album.id)
         .join(Artist, Track.artist_id == Artist.id)
         .join(subq, Track.id == subq.c.track_id)
         .order_by(desc(subq.c.play_count))
-        .limit(limit)
+        .limit(limit * 5)
     )
     result = await db.execute(q)
     rows = result.all()
-    return [
-        TrackResponse(
-            id=t.id,
-            title=t.title,
-            album_id=t.album_id,
-            artist_id=t.artist_id,
-            album_title=at,
-            artist_name=an,
-            track_number=t.track_number,
-            disc_number=t.disc_number,
-            duration=t.duration,
-            bitrate=t.bitrate,
-            format=t.format,
-        )
-        for t, at, an in rows
-    ]
+    return _filter_home_quality(rows, limit)
 
 
 @router.get("/tracks/most-played", response_model=list[TrackResponse])
@@ -269,37 +311,22 @@ async def list_most_played_tracks(
     limit: int = Query(20, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
 ) -> list[TrackResponse]:
-    """List most played tracks server-wide."""
+    """List most played tracks server-wide. Home page: only quality metadata."""
     subq = (
         select(PlayHistory.track_id, func.count(PlayHistory.id).label("play_count"))
         .group_by(PlayHistory.track_id)
     ).subquery()
     q = (
-        select(Track, Album.title, Artist.name)
+        select(Track, Album.title, Artist.name, Album.has_artwork)
         .join(Album, Track.album_id == Album.id)
         .join(Artist, Track.artist_id == Artist.id)
         .join(subq, Track.id == subq.c.track_id)
         .order_by(desc(subq.c.play_count))
-        .limit(limit)
+        .limit(limit * 5)
     )
     result = await db.execute(q)
     rows = result.all()
-    return [
-        TrackResponse(
-            id=t.id,
-            title=t.title,
-            album_id=t.album_id,
-            artist_id=t.artist_id,
-            album_title=at,
-            artist_name=an,
-            track_number=t.track_number,
-            disc_number=t.disc_number,
-            duration=t.duration,
-            bitrate=t.bitrate,
-            format=t.format,
-        )
-        for t, at, an in rows
-    ]
+    return _filter_home_quality(rows, limit)
 
 
 @router.get("/tracks/similar", response_model=list[TrackResponse])

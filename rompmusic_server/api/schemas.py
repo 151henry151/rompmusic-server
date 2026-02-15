@@ -55,6 +55,7 @@ class ArtistResponse(BaseModel):
     id: int
     name: str
     artwork_path: str | None = None
+    created_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -67,6 +68,7 @@ class AlbumResponse(BaseModel):
     year: int | None = None
     artwork_path: str | None = None
     track_count: int = 0
+    created_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -83,6 +85,8 @@ class TrackResponse(BaseModel):
     duration: float
     bitrate: int | None = None
     format: str | None = None
+    year: int | None = None  # Album year, for sorting/decade grouping
+    created_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
