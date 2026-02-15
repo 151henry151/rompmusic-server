@@ -13,7 +13,7 @@ from sqlalchemy import select
 from rompmusic_server.auth import get_current_user_id
 from rompmusic_server.config import settings
 from rompmusic_server.database import get_db
-from rompmusic_server.models import Track
+from rompmusic_server.models import PlayHistory, Track
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/stream", tags=["streaming"])
@@ -49,6 +49,13 @@ async def stream_track(
     track = result.scalar_one_or_none()
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
+
+    # Record play history (fire-and-forget; don't block response)
+    db.add(PlayHistory(user_id=user_id, track_id=track_id))
+    try:
+        await db.flush()
+    except Exception:
+        pass
 
     full_path = Path(settings.music_path) / track.file_path
     if not full_path.exists():

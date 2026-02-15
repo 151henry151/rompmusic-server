@@ -37,5 +37,16 @@ class Settings(BaseSettings):
     # Transcoding bitrates (kbps)
     transcode_bitrates: list[int] = [320, 128, 64]
 
+    # Email (for password reset, verification)
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str = "noreply@rompmusic.local"
+    app_base_url: str = "http://localhost:8080"
+
+    # Recommendations: Last.fm API (optional; free key at last.fm/api/account/create)
+    lastfm_api_key: str | None = None
+
 
 settings = Settings()

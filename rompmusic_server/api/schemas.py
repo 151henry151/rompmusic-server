@@ -25,6 +25,21 @@ class UserLogin(BaseModel):
     password: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    code: str
+    new_password: str
+
+
+class VerifyEmailRequest(BaseModel):
+    email: str
+    code: str
+
+
 class UserResponse(BaseModel):
     id: int
     username: str

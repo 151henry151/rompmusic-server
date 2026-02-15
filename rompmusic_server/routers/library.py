@@ -4,12 +4,12 @@
 """Library API routes - artists, albums, tracks."""
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from rompmusic_server.auth import get_optional_user_id
+from rompmusic_server.auth import get_current_user_id, get_optional_user_id
 from rompmusic_server.database import get_db
-from rompmusic_server.models import Album, Artist, Track
+from rompmusic_server.models import Album, Artist, PlayHistory, Track
 from rompmusic_server.api.schemas import AlbumResponse, ArtistResponse, TrackResponse
 
 router = APIRouter(prefix="/library", tags=["library"])
@@ -133,6 +133,220 @@ async def list_tracks(
     q = q.order_by(Track.album_id, Track.disc_number, Track.track_number).offset(skip).limit(limit)
     result = await db.execute(q)
     rows = result.all()
+    return [
+        TrackResponse(
+            id=t.id,
+            title=t.title,
+            album_id=t.album_id,
+            artist_id=t.artist_id,
+            album_title=at,
+            artist_name=an,
+            track_number=t.track_number,
+            disc_number=t.disc_number,
+            duration=t.duration,
+            bitrate=t.bitrate,
+            format=t.format,
+        )
+        for t, at, an in rows
+    ]
+
+
+@router.get("/tracks/recently-added", response_model=list[TrackResponse])
+async def list_recently_added_tracks(
+    limit: int = Query(20, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+) -> list[TrackResponse]:
+    """List most recently added tracks (by created_at)."""
+    q = (
+        select(Track, Album.title, Artist.name)
+        .join(Album, Track.album_id == Album.id)
+        .join(Artist, Track.artist_id == Artist.id)
+        .order_by(Track.created_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(q)
+    rows = result.all()
+    return [
+        TrackResponse(
+            id=t.id,
+            title=t.title,
+            album_id=t.album_id,
+            artist_id=t.artist_id,
+            album_title=at,
+            artist_name=an,
+            track_number=t.track_number,
+            disc_number=t.disc_number,
+            duration=t.duration,
+            bitrate=t.bitrate,
+            format=t.format,
+        )
+        for t, at, an in rows
+    ]
+
+
+@router.get("/tracks/recently-played", response_model=list[TrackResponse])
+async def list_recently_played_tracks(
+    limit: int = Query(20, ge=1, le=50),
+    user_id: int = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TrackResponse]:
+    """List user's recently played tracks."""
+    subq = (
+        select(PlayHistory.track_id, func.max(PlayHistory.played_at).label("last_played"))
+        .where(PlayHistory.user_id == user_id)
+        .group_by(PlayHistory.track_id)
+    ).subquery()
+    q = (
+        select(Track, Album.title, Artist.name)
+        .join(Album, Track.album_id == Album.id)
+        .join(Artist, Track.artist_id == Artist.id)
+        .join(subq, Track.id == subq.c.track_id)
+        .order_by(desc(subq.c.last_played))
+        .limit(limit)
+    )
+    result = await db.execute(q)
+    rows = result.all()
+    return [
+        TrackResponse(
+            id=t.id,
+            title=t.title,
+            album_id=t.album_id,
+            artist_id=t.artist_id,
+            album_title=at,
+            artist_name=an,
+            track_number=t.track_number,
+            disc_number=t.disc_number,
+            duration=t.duration,
+            bitrate=t.bitrate,
+            format=t.format,
+        )
+        for t, at, an in rows
+    ]
+
+
+@router.get("/tracks/frequently-played", response_model=list[TrackResponse])
+async def list_frequently_played_tracks(
+    limit: int = Query(20, ge=1, le=50),
+    user_id: int = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TrackResponse]:
+    """List user's most frequently played tracks."""
+    subq = (
+        select(PlayHistory.track_id, func.count(PlayHistory.id).label("play_count"))
+        .where(PlayHistory.user_id == user_id)
+        .group_by(PlayHistory.track_id)
+    ).subquery()
+    q = (
+        select(Track, Album.title, Artist.name)
+        .join(Album, Track.album_id == Album.id)
+        .join(Artist, Track.artist_id == Artist.id)
+        .join(subq, Track.id == subq.c.track_id)
+        .order_by(desc(subq.c.play_count))
+        .limit(limit)
+    )
+    result = await db.execute(q)
+    rows = result.all()
+    return [
+        TrackResponse(
+            id=t.id,
+            title=t.title,
+            album_id=t.album_id,
+            artist_id=t.artist_id,
+            album_title=at,
+            artist_name=an,
+            track_number=t.track_number,
+            disc_number=t.disc_number,
+            duration=t.duration,
+            bitrate=t.bitrate,
+            format=t.format,
+        )
+        for t, at, an in rows
+    ]
+
+
+@router.get("/tracks/most-played", response_model=list[TrackResponse])
+async def list_most_played_tracks(
+    limit: int = Query(20, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+) -> list[TrackResponse]:
+    """List most played tracks server-wide."""
+    subq = (
+        select(PlayHistory.track_id, func.count(PlayHistory.id).label("play_count"))
+        .group_by(PlayHistory.track_id)
+    ).subquery()
+    q = (
+        select(Track, Album.title, Artist.name)
+        .join(Album, Track.album_id == Album.id)
+        .join(Artist, Track.artist_id == Artist.id)
+        .join(subq, Track.id == subq.c.track_id)
+        .order_by(desc(subq.c.play_count))
+        .limit(limit)
+    )
+    result = await db.execute(q)
+    rows = result.all()
+    return [
+        TrackResponse(
+            id=t.id,
+            title=t.title,
+            album_id=t.album_id,
+            artist_id=t.artist_id,
+            album_title=at,
+            artist_name=an,
+            track_number=t.track_number,
+            disc_number=t.disc_number,
+            duration=t.duration,
+            bitrate=t.bitrate,
+            format=t.format,
+        )
+        for t, at, an in rows
+    ]
+
+
+@router.get("/tracks/similar", response_model=list[TrackResponse])
+async def list_similar_tracks(
+    track_id: int = Query(..., ge=1),
+    limit: int = Query(20, ge=1, le=50),
+    user_id: int | None = Depends(get_optional_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TrackResponse]:
+    """Get tracks similar to the given track. Uses Last.fm + collaborative filtering + content-based."""
+    from fastapi import HTTPException
+    from rompmusic_server.services.recommendations import get_similar_tracks
+
+    # Verify track exists
+    check = await db.execute(select(Track).where(Track.id == track_id))
+    if not check.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    rows = await get_similar_tracks(db, track_id, user_id, limit)
+    return [
+        TrackResponse(
+            id=t.id,
+            title=t.title,
+            album_id=t.album_id,
+            artist_id=t.artist_id,
+            album_title=at,
+            artist_name=an,
+            track_number=t.track_number,
+            disc_number=t.disc_number,
+            duration=t.duration,
+            bitrate=t.bitrate,
+            format=t.format,
+        )
+        for t, at, an in rows
+    ]
+
+
+@router.get("/tracks/recommended", response_model=list[TrackResponse])
+async def list_recommended_tracks(
+    limit: int = Query(20, ge=1, le=50),
+    user_id: int = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[TrackResponse]:
+    """Get recommended tracks based on user's play history. Uses similar-to-recent + collaborative filtering."""
+    from rompmusic_server.services.recommendations import get_recommended_tracks
+
+    rows = await get_recommended_tracks(db, user_id, limit)
     return [
         TrackResponse(
             id=t.id,
