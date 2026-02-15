@@ -3,7 +3,9 @@
 
 """Streaming API - serves audio with HTTP range request support."""
 
+import asyncio
 import mimetypes
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -34,10 +36,33 @@ def get_mime(path: Path) -> str:
     return EXT_MIME.get(ext) or mimetypes.guess_type(str(path))[0] or "application/octet-stream"
 
 
+async def _transcode_to_ogg(full_path: Path):
+    """Stream transcoded OGG Vorbis. Yields bytes. No range support."""
+    ffmpeg = shutil.which(settings.ffmpeg_path) or settings.ffmpeg_path
+    proc = await asyncio.create_subprocess_exec(
+        ffmpeg,
+        "-i", str(full_path),
+        "-f", "ogg",
+        "-acodec", "libvorbis",
+        "-q:a", "5",  # VBR quality ~160kbps
+        "-",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    chunk_size = 64 * 1024
+    while True:
+        chunk = await proc.stdout.read(chunk_size)
+        if not chunk:
+            break
+        yield chunk
+    await proc.wait()
+
+
 @router.get("/{track_id}")
 async def stream_track(
     track_id: int,
     request: Request,
+    format: str | None = "original",
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
@@ -60,6 +85,14 @@ async def stream_track(
     full_path = Path(settings.music_path) / track.file_path
     if not full_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
+
+    # Transcode to OGG when requested (no range support)
+    if (format or "").lower() == "ogg":
+        return StreamingResponse(
+            _transcode_to_ogg(full_path),
+            media_type="audio/ogg",
+            headers={"Content-Disposition": f'inline; filename="{full_path.stem}.ogg"'},
+        )
 
     file_size = full_path.stat().st_size
     mime = get_mime(full_path)
