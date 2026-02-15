@@ -67,6 +67,7 @@ class AlbumResponse(BaseModel):
     artist_name: str | None = None
     year: int | None = None
     artwork_path: str | None = None
+    has_artwork: bool | None = None
     track_count: int = 0
     created_at: datetime | None = None
 

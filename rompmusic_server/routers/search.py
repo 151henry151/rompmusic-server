@@ -46,6 +46,7 @@ async def search(
             artist_name=an,
             year=a.year,
             artwork_path=a.artwork_path,
+            has_artwork=a.has_artwork,
         )
         for a, an in albums_result.all()
     ]
