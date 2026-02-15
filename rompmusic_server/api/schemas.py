@@ -55,6 +55,9 @@ class ArtistResponse(BaseModel):
     id: int
     name: str
     artwork_path: str | None = None
+    has_artwork: bool | None = None
+    primary_album_id: int | None = None
+    primary_album_title: str | None = None
     created_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)

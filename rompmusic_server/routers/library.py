@@ -23,6 +23,28 @@ def _artist_order(q, sort_by: str, order: str):
     return q.order_by(desc(col) if order == "desc" else asc(col))
 
 
+def _artist_primary_album_id():
+    from sqlalchemy import asc
+    return (
+        select(Album.id)
+        .where(Album.artist_id == Artist.id)
+        .order_by(Album.year.desc().nullslast(), asc(Album.id))
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
+def _artist_primary_album_title():
+    from sqlalchemy import asc
+    return (
+        select(Album.title)
+        .where(Album.artist_id == Artist.id)
+        .order_by(Album.year.desc().nullslast(), asc(Album.id))
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
 @router.get("/artists", response_model=list[ArtistResponse])
 async def list_artists(
     skip: int = Query(0, ge=0),
@@ -34,7 +56,17 @@ async def list_artists(
     db: AsyncSession = Depends(get_db),
 ) -> list[ArtistResponse]:
     """List artists with optional search and sort."""
-    q = select(Artist)
+    from sqlalchemy import exists
+
+    has_artwork_subq = exists().where(
+        Album.artist_id == Artist.id, Album.has_artwork == True
+    )
+    q = select(
+        Artist,
+        has_artwork_subq.label("has_artwork"),
+        _artist_primary_album_id().label("primary_album_id"),
+        _artist_primary_album_title().label("primary_album_title"),
+    )
     if search:
         q = q.where(Artist.name.ilike(f"%{search}%"))
     if home:
@@ -42,8 +74,19 @@ async def list_artists(
         q = q.distinct()
     q = _artist_order(q, sort_by, order).offset(skip).limit(limit)
     result = await db.execute(q)
-    artists = result.scalars().all()
-    return [ArtistResponse.model_validate(a) for a in artists]
+    rows = result.all()
+    return [
+        ArtistResponse(
+            id=a.id,
+            name=a.name,
+            artwork_path=a.artwork_path,
+            has_artwork=bool(has_art) if has_art is not None else None,
+            primary_album_id=pid,
+            primary_album_title=ptitle,
+            created_at=a.created_at,
+        )
+        for a, has_art, pid, ptitle in rows
+    ]
 
 
 @router.get("/artists/{artist_id}", response_model=ArtistResponse)
@@ -52,12 +95,33 @@ async def get_artist(
     db: AsyncSession = Depends(get_db),
 ) -> ArtistResponse:
     """Get artist by ID."""
-    result = await db.execute(select(Artist).where(Artist.id == artist_id))
-    artist = result.scalar_one_or_none()
-    if not artist:
+    from sqlalchemy import exists
+
+    has_artwork_subq = exists().where(
+        Album.artist_id == Artist.id, Album.has_artwork == True
+    )
+    result = await db.execute(
+        select(
+            Artist,
+            has_artwork_subq.label("has_artwork"),
+            _artist_primary_album_id().label("primary_album_id"),
+            _artist_primary_album_title().label("primary_album_title"),
+        ).where(Artist.id == artist_id)
+    )
+    row = result.one_or_none()
+    if not row:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Artist not found")
-    return ArtistResponse.model_validate(artist)
+    artist, has_art, pid, ptitle = row
+    return ArtistResponse(
+        id=artist.id,
+        name=artist.name,
+        artwork_path=artist.artwork_path,
+        has_artwork=bool(has_art) if has_art is not None else None,
+        primary_album_id=pid,
+        primary_album_title=ptitle,
+        created_at=artist.created_at,
+    )
 
 
 def _album_order(q, sort_by: str, order: str):
