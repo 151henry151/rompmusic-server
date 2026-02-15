@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}RompMusic Admin - Dashboard{% endblock %}
+{% block content %}
+<div class="container">
+    <nav style="margin-bottom: 2rem;">
+        <a href="/server/dashboard">Dashboard</a> | <a href="/api/docs">API</a>
+    </nav>
+    <h1>RompMusic Admin</h1>
+    <p>Logged in as {{ user.username }}</p>
+
+    <div class="card">
+        <h2>Library</h2>
+        <div class="stats">
+            <div class="stat"><span class="stat-value">{{ artists_count }}</span><br>Artists</div>
+            <div class="stat"><span class="stat-value">{{ albums_count }}</span><br>Albums</div>
+            <div class="stat"><span class="stat-value">{{ tracks_count }}</span><br>Tracks</div>
+            <div class="stat"><span class="stat-value">{{ users_count }}</span><br>Users</div>
+        </div>
+        <p style="margin-top: 1rem;">
+            <button hx-post="/server/scan"
+                    hx-swap="innerHTML"
+                    hx-target="#scan-result"
+                    hx-indicator="#scan-spinner">
+                Scan Library
+            </button>
+            <span id="scan-spinner" class="htmx-indicator"> Scanning...</span>
+        </p>
+        <div id="scan-result"></div>
+    </div>
+
+    <div class="card">
+        <h2>Quick Links</h2>
+        <p><a href="/api/docs">API Documentation (Swagger)</a></p>
+        <p><a href="/api/redoc">API Documentation (ReDoc)</a></p>
+    </div>
+</div>
+{% endblock %}

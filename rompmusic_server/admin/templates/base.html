@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}RompMusic Admin{% endblock %}</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        :root { --bg: #0f0f0f; --fg: #e0e0e0; --accent: #4a9eff; }
+        * { box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--fg); min-height: 100vh; }
+        .container { max-width: 900px; margin: 0 auto; padding: 2rem; }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        button, .btn { background: var(--accent); color: #fff; border: none; padding: 0.6rem 1.2rem; border-radius: 6px; cursor: pointer; font-size: 1rem; }
+        button:hover { opacity: 0.9; }
+        input { padding: 0.6rem; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: var(--fg); }
+        .card { background: #1a1a1a; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; }
+        .stat { text-align: center; }
+        .stat-value { font-size: 2rem; font-weight: bold; color: var(--accent); }
+    </style>
+</head>
+<body>
+    {% block content %}{% endblock %}
+</body>
+</html>
