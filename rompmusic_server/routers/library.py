@@ -56,10 +56,10 @@ async def list_artists(
     db: AsyncSession = Depends(get_db),
 ) -> list[ArtistResponse]:
     """List artists with optional search and sort."""
-    from sqlalchemy import exists
+    from sqlalchemy import exists, or_
 
-    has_artwork_subq = exists().where(
-        Album.artist_id == Artist.id, Album.has_artwork == True
+    has_artwork_subq = exists().where(Album.artist_id == Artist.id).where(
+        or_(Album.has_artwork == True, Album.has_artwork.is_(None))
     )
     q = select(
         Artist,
@@ -95,10 +95,10 @@ async def get_artist(
     db: AsyncSession = Depends(get_db),
 ) -> ArtistResponse:
     """Get artist by ID."""
-    from sqlalchemy import exists
+    from sqlalchemy import exists, or_
 
-    has_artwork_subq = exists().where(
-        Album.artist_id == Artist.id, Album.has_artwork == True
+    has_artwork_subq = exists().where(Album.artist_id == Artist.id).where(
+        or_(Album.has_artwork == True, Album.has_artwork.is_(None))
     )
     result = await db.execute(
         select(
