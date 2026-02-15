@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from rompmusic_server.database import init_db
-from rompmusic_server.routers import auth, library, streaming, search, playlists, artwork, admin
+from rompmusic_server.routers import auth, config, library, streaming, search, playlists, artwork, admin
 from rompmusic_server.admin import views as admin_views
 
 
@@ -40,6 +40,7 @@ app.add_middleware(
 
 # API v1
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(config.router, prefix="/api/v1")
 app.include_router(library.router, prefix="/api/v1")
 app.include_router(streaming.router, prefix="/api/v1")
 app.include_router(search.router, prefix="/api/v1")
