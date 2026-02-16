@@ -43,3 +43,7 @@ dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "httpx>=0.26", "ruff>=0.1"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["rompmusic_server*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

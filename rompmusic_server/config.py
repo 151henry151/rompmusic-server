@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8080
     base_url: str = "http://localhost:8080"
+    # CORS: comma-separated origins, or "*" for allow all (e.g. "https://rompmusic.com,https://app.rompmusic.com")
+    cors_origins: str = "*"
 
     # FFmpeg
     ffmpeg_path: str = "ffmpeg"

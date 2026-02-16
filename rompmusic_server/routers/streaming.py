@@ -84,8 +84,9 @@ async def stream_track(
     except Exception:
         pass
 
-    full_path = Path(settings.music_path) / track.file_path
-    if not full_path.exists():
+    base = Path(settings.music_path).resolve()
+    full_path = (base / track.file_path).resolve()
+    if not full_path.is_relative_to(base) or not full_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
     # Transcode to OGG when requested (no range support)

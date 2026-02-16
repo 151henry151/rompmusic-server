@@ -6,12 +6,13 @@
 import secrets
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rompmusic_server.auth import create_access_token, get_current_user_id, hash_password, verify_password
 from rompmusic_server.database import get_db
+from rompmusic_server.rate_limit import rate_limit_auth_dep
 from rompmusic_server.models import PasswordResetToken, User, VerificationCode
 from rompmusic_server.api.schemas import (
     Token,
@@ -27,7 +28,7 @@ from rompmusic_server.services.email import send_email
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=Token, dependencies=[Depends(rate_limit_auth_dep)])
 async def login(
     data: UserLogin,
     db: AsyncSession = Depends(get_db),
@@ -46,7 +47,7 @@ async def login(
     return Token(access_token=token)
 
 
-@router.post("/register", response_model=UserResponse)
+@router.post("/register", response_model=UserResponse, dependencies=[Depends(rate_limit_auth_dep)])
 async def register(
     data: UserCreate,
     db: AsyncSession = Depends(get_db),
@@ -89,7 +90,7 @@ async def register(
     return UserResponse.model_validate(user)
 
 
-@router.post("/verify-email")
+@router.post("/verify-email", dependencies=[Depends(rate_limit_auth_dep)])
 async def verify_email(
     data: VerifyEmailRequest,
     db: AsyncSession = Depends(get_db),
@@ -115,7 +116,7 @@ async def verify_email(
     return {"message": "Email verified. You can now sign in."}
 
 
-@router.post("/forgot-password")
+@router.post("/forgot-password", dependencies=[Depends(rate_limit_auth_dep)])
 async def forgot_password(
     data: ForgotPasswordRequest,
     db: AsyncSession = Depends(get_db),
@@ -141,7 +142,7 @@ async def forgot_password(
     return {"message": "If an account exists, you will receive a password reset link."}
 
 
-@router.post("/reset-password")
+@router.post("/reset-password", dependencies=[Depends(rate_limit_auth_dep)])
 async def reset_password(
     data: ResetPasswordRequest,
     db: AsyncSession = Depends(get_db),
