@@ -10,10 +10,8 @@ from rompmusic_server.models.base import Base
 
 # Default client settings policy when none is stored
 DEFAULT_CLIENT_SETTINGS = {
-    "display_albums_without_artwork": {"visible": True, "default": False},
-    "display_artists_without_artwork": {"visible": True, "default": False},
     "group_artists_by_capitalization": {"visible": True, "default": True},
-    "group_collaborations_by_primary": {"visible": True, "default": False},
+    "group_collaborations_by_primary": {"visible": False, "default": True},
     "audio_format": {"visible": True, "default": "original", "allowed": ["original", "ogg"]},
 }
 

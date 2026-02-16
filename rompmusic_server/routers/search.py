@@ -32,9 +32,7 @@ async def search(
         _artist_primary_album_title,
     )
 
-    has_artwork_subq = exists().where(Album.artist_id == Artist.id).where(
-        or_(Album.has_artwork == True, Album.has_artwork.is_(None))
-    )
+    has_artwork_subq = exists().where(Album.artist_id == Artist.id).where(Album.has_artwork == True)
     artists_result = await db.execute(
         select(
             Artist,

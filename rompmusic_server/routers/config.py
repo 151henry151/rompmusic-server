@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from rompmusic_server.auth import get_current_user_id
+from rompmusic_server.auth import get_optional_user_id
 from rompmusic_server.database import get_db
 from rompmusic_server.models.server_config import DEFAULT_CLIENT_SETTINGS, ServerConfig
 
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/config", tags=["config"])
 
 @router.get("/client")
 async def get_client_config(
-    _user_id: int = Depends(get_current_user_id),
+    _user_id: int | None = Depends(get_optional_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """

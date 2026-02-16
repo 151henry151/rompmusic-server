@@ -58,9 +58,7 @@ async def list_artists(
     """List artists with optional search and sort."""
     from sqlalchemy import exists, or_
 
-    has_artwork_subq = exists().where(Album.artist_id == Artist.id).where(
-        or_(Album.has_artwork == True, Album.has_artwork.is_(None))
-    )
+    has_artwork_subq = exists().where(Album.artist_id == Artist.id).where(Album.has_artwork == True)
     q = select(
         Artist,
         has_artwork_subq.label("has_artwork"),
@@ -97,9 +95,7 @@ async def get_artist(
     """Get artist by ID."""
     from sqlalchemy import exists, or_
 
-    has_artwork_subq = exists().where(Album.artist_id == Artist.id).where(
-        or_(Album.has_artwork == True, Album.has_artwork.is_(None))
-    )
+    has_artwork_subq = exists().where(Album.artist_id == Artist.id).where(Album.has_artwork == True)
     result = await db.execute(
         select(
             Artist,
@@ -125,17 +121,26 @@ async def get_artist(
 
 
 def _album_order(q, sort_by: str, order: str):
-    """Apply sort to album query. q must have Album and Artist joined."""
-    from sqlalchemy import asc
+    """Apply sort to album query. q must have Album and Artist joined.
+    For alphabetical sorts (title, artist), items starting with 0-9 or special
+    characters are placed at the end; A-Z always come first.
+    """
+    from sqlalchemy import asc, case, func
     if sort_by == "year":
         col = Album.year
-    elif sort_by == "date_added":
+        return q.order_by(desc(col).nullslast() if order == "desc" else asc(col).nullslast())
+    if sort_by == "date_added":
         col = Album.created_at
-    elif sort_by == "artist":
+        return q.order_by(desc(col).nullslast() if order == "desc" else asc(col).nullslast())
+    # Alphabetical sort: letters first, then numbers/symbols at the end
+    if sort_by == "artist":
         col = Artist.name
     else:  # title
         col = Album.title
-    return q.order_by(desc(col).nullslast() if order == "desc" else asc(col).nullslast())
+    first_char = func.lower(func.substr(col, 1, 1))
+    letter_first = case((first_char.between("a", "z"), 0), else_=1)
+    dir_col = desc(col).nullslast() if order == "desc" else asc(col).nullslast()
+    return q.order_by(letter_first, dir_col)
 
 
 @router.get("/albums", response_model=list[AlbumResponse])
@@ -146,18 +151,22 @@ async def list_albums(
     search: str | None = Query(None),
     sort_by: str = Query("year", description="Sort: year, date_added, artist, title"),
     order: str = Query("desc", description="Order: asc, desc"),
+    random: bool = Query(False, description="Return random albums"),
     db: AsyncSession = Depends(get_db),
 ) -> list[AlbumResponse]:
     """List albums with optional filters and sort."""
+    from sqlalchemy import func
     q = select(Album, Artist.name).join(Artist, Album.artist_id == Artist.id)
     if artist_id:
         q = q.where(Album.artist_id == artist_id)
     if search:
         q = q.where(Album.title.ilike(f"%{search}%"))
-    q = _album_order(q, sort_by, order).offset(skip).limit(limit)
+    if random:
+        q = q.order_by(func.random()).offset(skip).limit(limit)
+    else:
+        q = _album_order(q, sort_by, order).offset(skip).limit(limit)
     result = await db.execute(q)
     rows = result.all()
-    from sqlalchemy import func
     out = []
     for a, an in rows:
         tc = await db.scalar(select(func.count()).select_from(Track).where(Track.album_id == a.id))

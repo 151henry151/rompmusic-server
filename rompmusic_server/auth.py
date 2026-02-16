@@ -104,3 +104,25 @@ async def get_optional_user_id(
         return None
     user_id = payload.get("sub")
     return int(user_id) if user_id else None
+
+
+async def get_optional_user_id_for_stream(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> int | None:
+    """Extract user ID from JWT for streaming. Accepts Bearer, cookie, or token query param.
+    Returns None if no/missing/invalid token - allows anonymous streaming."""
+    token = None
+    if credentials:
+        token = credentials.credentials
+    elif hasattr(request, "cookies") and request.cookies.get("admin_token"):
+        token = request.cookies.get("admin_token")
+    elif request.query_params.get("token"):
+        token = request.query_params.get("token")
+    if not token:
+        return None
+    payload = decode_token(token)
+    if not payload:
+        return None
+    user_id = payload.get("sub")
+    return int(user_id) if user_id else None

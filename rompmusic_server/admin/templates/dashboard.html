@@ -99,8 +99,6 @@
 
     const API_BASE = '{{ api_base }}';
     const CLIENT_SETTING_LABELS = {
-        display_albums_without_artwork: 'Display albums without artwork',
-        display_artists_without_artwork: 'Display artists without artwork',
         group_artists_by_capitalization: 'Group artists with different capitalization',
         group_collaborations_by_primary: 'Group collaborations by primary artist',
         audio_format: 'Audio quality (format)',
@@ -177,33 +175,6 @@
     <div class="card">
         <h2>Client Settings Policy</h2>
         <p style="color: #94a3b8; font-size: 0.9rem;">Control which settings are visible to app users and their defaults. When hidden, the default applies to all users.</p>
-        <div id="client-config-loading" style="color: #94a3b8;">Loading...</div>
-        <form id="client-config-form" style="display: none; margin-top: 1rem;">
-            <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
-                <thead>
-                    <tr style="border-bottom: 1px solid #334155;">
-                        <th style="text-align: left; padding: 0.5rem 0;">Setting</th>
-                        <th style="text-align: left; padding: 0.5rem 0;">Visible to users</th>
-                        <th style="text-align: left; padding: 0.5rem 0;">Default</th>
-                    </tr>
-                </thead>
-                <tbody id="client-config-body"></tbody>
-            </table>
-            <p style="margin-top: 1rem;">
-                <button type="submit">Save</button>
-                <span id="client-config-msg" style="margin-left: 1rem;"></span>
-            </p>
-        </form>
-    </div>
-
-    <div class="card">
-        <h2>Quick Links</h2>
-        <p><a href="/api/docs">API Documentation (Swagger)</a></p>
-        <p><a href="/api/redoc">API Documentation (ReDoc)</a></p>
-    </div>
-</div>
-{% endblock %}
-l which settings are visible to app users and their defaults. When hidden, the default applies to all users.</p>
         <div id="client-config-loading" style="color: #94a3b8;">Loading...</div>
         <form id="client-config-form" style="display: none; margin-top: 1rem;">
             <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">

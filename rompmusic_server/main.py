@@ -3,9 +3,12 @@
 
 """RompMusic Server - Main FastAPI application."""
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+
+logger = logging.getLogger(__name__)
 from fastapi.middleware.cors import CORSMiddleware
 
 from rompmusic_server.database import init_db
@@ -17,6 +20,12 @@ from rompmusic_server.admin import views as admin_views
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     await init_db()
+    from rompmusic_server.config import settings
+    if not settings.lastfm_api_key:
+        logger.info(
+            "LASTFM_API_KEY not set - artist images will show placeholders. "
+            "Get a free key at https://last.fm/api/account/create"
+        )
     yield
     # shutdown
 
