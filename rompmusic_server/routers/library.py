@@ -154,13 +154,23 @@ async def list_albums(
     random: bool = Query(False, description="Return random albums"),
     db: AsyncSession = Depends(get_db),
 ) -> list[AlbumResponse]:
-    """List albums with optional filters and sort."""
-    from sqlalchemy import func
+    """List albums with optional filters and sort.
+    When search is set, matches album title, artist name, or any track title on the album.
+    """
+    from sqlalchemy import exists, func, or_
     q = select(Album, Artist.name).join(Artist, Album.artist_id == Artist.id)
     if artist_id:
         q = q.where(Album.artist_id == artist_id)
     if search:
-        q = q.where(Album.title.ilike(f"%{search}%"))
+        pattern = f"%{search}%"
+        album_has_matching_track = exists().where(Track.album_id == Album.id).where(Track.title.ilike(pattern))
+        q = q.where(
+            or_(
+                Album.title.ilike(pattern),
+                Artist.name.ilike(pattern),
+                album_has_matching_track,
+            )
+        )
     if random:
         q = q.order_by(func.random()).offset(skip).limit(limit)
     else:
@@ -216,9 +226,15 @@ async def get_album(
     )
 
 
-def _track_order(q, sort_by: str, order: str):
-    """Apply sort to track query. q must have Track, Album, Artist."""
+def _track_order(q, sort_by: str, order: str, album_id: int | None = None):
+    """Apply sort to track query. q must have Track, Album, Artist.
+    When album_id is set, use disc_number then track_number so multi-disc albums play in order."""
     from sqlalchemy import asc
+    if album_id is not None:
+        return q.order_by(
+            asc(Track.disc_number).nullslast(),
+            asc(Track.track_number).nullslast(),
+        )
     if sort_by == "year":
         col = Album.year
     elif sort_by == "date_added":
@@ -255,7 +271,7 @@ async def list_tracks(
         q = q.where(Track.artist_id == artist_id)
     if search:
         q = q.where(Track.title.ilike(f"%{search}%"))
-    q = _track_order(q, sort_by, order).offset(skip).limit(limit)
+    q = _track_order(q, sort_by, order, album_id=album_id).offset(skip).limit(limit)
     result = await db.execute(q)
     rows = result.all()
     return [
