@@ -3,18 +3,18 @@
 
 """Web admin panel routes."""
 
+import asyncio
+import json
 from pathlib import Path
 
-import json
-
-from fastapi import APIRouter, Depends, Request, Form
+from fastapi import APIRouter, Depends, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rompmusic_server.auth import create_access_token, get_current_user_id, verify_password
-from rompmusic_server.database import get_db
+from rompmusic_server.database import async_session_maker, get_db
 from rompmusic_server.models import Album, Artist, Track, User
 from rompmusic_server.services.scanner import scan_library
 
@@ -108,40 +108,83 @@ async def admin_trigger_scan(
     )
 
 
+def _get_scan_state(app: FastAPI) -> dict:
+    """Get or create app-state for background scan."""
+    if not hasattr(app.state, "scan_progress"):
+        app.state.scan_progress = {
+            "processed": 0,
+            "total": 0,
+            "current_file": None,
+            "artists": 0,
+            "albums": 0,
+            "tracks": 0,
+            "done": False,
+            "error": None,
+        }
+    if not hasattr(app.state, "scan_task"):
+        app.state.scan_task = None
+    return app.state.scan_progress
+
+
+def start_background_scan(app: FastAPI) -> bool:
+    """Start library scan in background if not already running. Returns True if started."""
+    state = _get_scan_state(app)
+    if app.state.scan_task is not None and not app.state.scan_task.done():
+        return False
+
+    state.update(
+        processed=0, total=0, current_file=None, artists=0, albums=0, tracks=0, done=False, error=None
+    )
+
+    async def run_scan_background():
+        async with async_session_maker() as session:
+            try:
+                def on_progress(processed, total, current_file, artists, albums, tracks):
+                    state.update(
+                        processed=processed,
+                        total=total,
+                        current_file=current_file,
+                        artists=artists,
+                        albums=albums,
+                        tracks=tracks,
+                        done=False,
+                        error=None,
+                    )
+
+                await scan_library(session, on_progress=on_progress)
+                await session.commit()
+                state["done"] = True
+            except Exception as e:
+                state["done"] = True
+                state["error"] = str(e)
+            finally:
+                app.state.scan_task = None
+
+    app.state.scan_task = asyncio.create_task(run_scan_background())
+    return True
+
+
 @router.post("/scan/stream")
 async def admin_trigger_scan_stream(
+    request: Request,
     _user: User = Depends(require_admin_user),
-    db: AsyncSession = Depends(get_db),
 ):
-    """Stream scan progress via Server-Sent Events."""
+    """Stream scan progress via Server-Sent Events. Scan runs in background with its own
+    DB session so it continues even if the browser tab is closed."""
+
+    start_background_scan(request.app)
+    state = _get_scan_state(request.app)
 
     async def event_generator():
-        import asyncio
-
-        queue: asyncio.Queue = asyncio.Queue()
-
-        def on_progress(processed, total, current_file, artists, albums, tracks):
-            queue.put_nowait({
-                "processed": processed,
-                "total": total,
-                "current_file": current_file,
-                "artists": artists,
-                "albums": albums,
-                "tracks": tracks,
-            })
-
-        async def run_scan():
-            await scan_library(db, on_progress=on_progress)
-            queue.put_nowait(None)
-
-        task = asyncio.create_task(run_scan())
-
+        last = None
         while True:
-            item = await queue.get()
-            if item is None:
-                yield f"data: {json.dumps({'done': True})}\n\n"
+            current = dict(state)
+            if current != last:
+                last = current
+                yield f"data: {json.dumps(current)}\n\n"
+            if current.get("done"):
                 break
-            yield f"data: {json.dumps(item)}\n\n"
+            await asyncio.sleep(0.3)
 
     return StreamingResponse(
         event_generator(),

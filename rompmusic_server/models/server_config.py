@@ -13,6 +13,7 @@ DEFAULT_CLIENT_SETTINGS = {
     "group_artists_by_capitalization": {"visible": True, "default": True},
     "group_collaborations_by_primary": {"visible": False, "default": True},
     "audio_format": {"visible": True, "default": "original", "allowed": ["original", "ogg"]},
+    "albums_artwork_first": {"visible": True, "default": True},
 }
 
 

@@ -3,6 +3,7 @@
 
 """RompMusic Server - Main FastAPI application."""
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -35,6 +36,49 @@ async def lifespan(app: FastAPI):
             "LASTFM_API_KEY not set - artist images will show placeholders. "
             "Get a free key at https://last.fm/api/account/create"
         )
+    app.state.scan_task = None
+    app.state.scan_progress = {
+        "processed": 0, "total": 0, "current_file": None,
+        "artists": 0, "albums": 0, "tracks": 0, "done": False, "error": None,
+    }
+    if settings.auto_scan_interval_hours > 0:
+        interval_sec = settings.auto_scan_interval_hours * 3600
+
+        async def scheduled_scan_loop():
+            while True:
+                await asyncio.sleep(interval_sec)
+                if admin_views.start_background_scan(app):
+                    logger.info("Scheduled library scan started")
+
+        asyncio.create_task(scheduled_scan_loop())
+        logger.info("Auto library scan enabled every %.1f hours", settings.auto_scan_interval_hours)
+
+    if settings.beets_auto_interval_hours > 0:
+        import shutil
+        beets_interval_sec = settings.beets_auto_interval_hours * 3600
+
+        async def beets_loop():
+            beet = shutil.which("beet") or "beet"
+            music_path = str(settings.music_path)
+            while True:
+                await asyncio.sleep(beets_interval_sec)
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        beet, "fetch-art", "-y",
+                        cwd=music_path,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    _, stderr = await proc.communicate()
+                    if proc.returncode == 0:
+                        logger.info("Beets fetch-art completed")
+                    else:
+                        logger.warning("Beets fetch-art exited %s: %s", proc.returncode, (stderr or b"").decode()[:200])
+                except Exception as e:
+                    logger.warning("Beets fetch-art failed: %s", e)
+
+        asyncio.create_task(beets_loop())
+        logger.info("Beets fetch-art enabled every %.1f hours", settings.beets_auto_interval_hours)
     yield
     # shutdown
 
@@ -42,7 +86,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="RompMusic Server",
     description="Libre self-hosted music streaming API",
-    version="0.1.0",
+    version="0.1.0-beta.2",
     lifespan=lifespan,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -83,7 +127,7 @@ async def root():
     """Health check / API info."""
     return {
         "name": "RompMusic Server",
-        "version": "0.1.0",
+        "version": "0.1.0-beta.2",
         "api": "/api/v1",
         "docs": "/api/docs",
     }

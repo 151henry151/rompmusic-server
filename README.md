@@ -33,6 +33,18 @@ cp .env.example .env
 uvicorn rompmusic_server.main:app --reload
 ```
 
+## Configuration
+
+Environment variables (see `.env.example`). Notable options:
+
+| Variable | Default | Description |
+|----------|--------|-------------|
+| `MUSIC_PATH` | `/music` | Path to your music library |
+| `AUTO_SCAN_INTERVAL_HOURS` | `0` (disabled) | Run a library scan every N hours (e.g. `24` for daily). Scan runs in the background. |
+| `BEETS_AUTO_INTERVAL_HOURS` | `0` (disabled) | Run `beet fetch-art -y` in the music directory every N hours (e.g. `24` for daily). Requires `beet` on the PATH. |
+
+The library scan triggered from the admin dashboard runs in a background task with its own database session, so it continues even if you close the browser tab.
+
 ## Docker
 
 ```bash

@@ -152,12 +152,14 @@ async def list_albums(
     sort_by: str = Query("year", description="Sort: year, date_added, artist, title"),
     order: str = Query("desc", description="Order: asc, desc"),
     random: bool = Query(False, description="Return random albums"),
+    artwork_first: bool = Query(True, description="Put albums with artwork first (no-art at bottom)"),
     db: AsyncSession = Depends(get_db),
 ) -> list[AlbumResponse]:
     """List albums with optional filters and sort.
     When search is set, matches album title, artist name, or any track title on the album.
+    When artwork_first is true, albums with artwork are listed before those without.
     """
-    from sqlalchemy import exists, func, or_
+    from sqlalchemy import asc, exists, func, or_
     q = select(Album, Artist.name).join(Artist, Album.artist_id == Artist.id)
     if artist_id:
         q = q.where(Album.artist_id == artist_id)
@@ -174,6 +176,8 @@ async def list_albums(
     if random:
         q = q.order_by(func.random()).offset(skip).limit(limit)
     else:
+        if artwork_first:
+            q = q.order_by(desc(Album.has_artwork).nullslast())
         q = _album_order(q, sort_by, order).offset(skip).limit(limit)
     result = await db.execute(q)
     rows = result.all()
