@@ -4,6 +4,7 @@
 """Admin API - scan library, client config, etc. Requires admin user."""
 
 import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -247,6 +248,73 @@ async def create_invitation(
     )
     await db.commit()
     return {"message": "Invitation sent.", "email": email}
+
+
+@router.get("/invitations")
+async def list_pending_invitations(
+    _admin_id: int = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    """List pending (unused, not expired) invitations. Admin only."""
+    result = await db.execute(
+        select(Invitation)
+        .where(
+            Invitation.used_at.is_(None),
+            Invitation.expires_at > datetime.now(timezone.utc),
+        )
+        .order_by(Invitation.created_at.desc())
+    )
+    invitations = result.scalars().all()
+    return [
+        {
+            "id": inv.id,
+            "email": inv.email,
+            "username": inv.username,
+            "expires_at": inv.expires_at.isoformat() if inv.expires_at else None,
+            "created_at": inv.created_at.isoformat() if inv.created_at else None,
+        }
+        for inv in invitations
+    ]
+
+
+@router.post("/invitations/{invitation_id}/resend")
+async def resend_invitation_email(
+    invitation_id: int,
+    _admin_id: int = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Resend the invitation email for a pending invite. Admin only."""
+    from rompmusic_server.config import settings
+
+    result = await db.execute(
+        select(Invitation).where(
+            Invitation.id == invitation_id,
+            Invitation.used_at.is_(None),
+            Invitation.expires_at > datetime.now(timezone.utc),
+        )
+    )
+    inv = result.scalar_one_or_none()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invitation not found or already used/expired")
+    base = (settings.app_base_url or settings.base_url or "http://localhost:8080").rstrip("/")
+    link = f"{base}/invite?token={inv.token}"
+    if inv.username:
+        body_text = (
+            f"You have been invited to RompMusic.\n\n"
+            f"Your username is: {inv.username}\n"
+            f"Your password is: {inv.username} (same as username). You can change it after logging in.\n\n"
+            f"Click the link below to activate your account:\n\n{link}\n\nThe link expires in 7 days."
+        )
+    else:
+        body_text = (
+            f"You have been invited to RompMusic. Click the link below to create your account (you will choose a username and password):\n\n{link}\n\nThe link expires in 7 days."
+        )
+    await send_email(
+        inv.email,
+        "You're invited to RompMusic",
+        body_text,
+    )
+    return {"message": "Invitation email resent."}
 
 
 @router.get("/server-config")
