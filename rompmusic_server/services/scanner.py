@@ -94,7 +94,7 @@ def _get_tag(tags: Any, keys: list[str]) -> str | None:
                     val = val.decode("utf-8", errors="replace")
                 if val:
                     return str(val).strip()
-        except (KeyError, IndexError, TypeError):
+        except (KeyError, IndexError, TypeError, ValueError):
             continue
     return None
 
