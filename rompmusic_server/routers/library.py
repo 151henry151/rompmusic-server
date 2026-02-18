@@ -3,11 +3,11 @@
 
 """Library API routes - artists, albums, tracks."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from rompmusic_server.auth import get_current_user_id, get_optional_user_id
+from rompmusic_server.auth import get_current_user_id, get_optional_user_id, get_user_id_or_anonymous
 from rompmusic_server.database import get_db
 from rompmusic_server.models import Album, Artist, PlayHistory, Track
 from rompmusic_server.api.schemas import AlbumResponse, ArtistResponse, TrackResponse
@@ -351,16 +351,29 @@ async def list_recently_added_tracks(
     return _filter_home_quality(rows, limit)
 
 
+def _play_history_filter_user_or_anon(user_id: int | None, anonymous_id: str | None):
+    """Filter PlayHistory by user_id or anonymous_id (one must be set)."""
+    if user_id is not None:
+        return PlayHistory.user_id == user_id
+    if anonymous_id is not None:
+        return PlayHistory.anonymous_id == anonymous_id
+    return None
+
+
 @router.get("/tracks/recently-played", response_model=list[TrackResponse])
 async def list_recently_played_tracks(
     limit: int = Query(20, ge=1, le=50),
-    user_id: int = Depends(get_current_user_id),
+    user_or_anon: tuple[int | None, str | None] = Depends(get_user_id_or_anonymous),
     db: AsyncSession = Depends(get_db),
 ) -> list[TrackResponse]:
-    """List user's recently played tracks. Home page: only quality metadata."""
+    """List user's or anonymous session's recently played tracks. Public server: cookie-based anonymous."""
+    user_id, anonymous_id = user_or_anon
+    filt = _play_history_filter_user_or_anon(user_id, anonymous_id)
+    if filt is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     subq = (
         select(PlayHistory.track_id, func.max(PlayHistory.played_at).label("last_played"))
-        .where(PlayHistory.user_id == user_id)
+        .where(filt)
         .group_by(PlayHistory.track_id)
     ).subquery()
     q = (
@@ -379,13 +392,17 @@ async def list_recently_played_tracks(
 @router.get("/tracks/frequently-played", response_model=list[TrackResponse])
 async def list_frequently_played_tracks(
     limit: int = Query(20, ge=1, le=50),
-    user_id: int = Depends(get_current_user_id),
+    user_or_anon: tuple[int | None, str | None] = Depends(get_user_id_or_anonymous),
     db: AsyncSession = Depends(get_db),
 ) -> list[TrackResponse]:
-    """List user's most frequently played tracks. Home page: only quality metadata."""
+    """List user's or anonymous session's frequently played tracks. Public server: cookie-based anonymous."""
+    user_id, anonymous_id = user_or_anon
+    filt = _play_history_filter_user_or_anon(user_id, anonymous_id)
+    if filt is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     subq = (
         select(PlayHistory.track_id, func.count(PlayHistory.id).label("play_count"))
-        .where(PlayHistory.user_id == user_id)
+        .where(filt)
         .group_by(PlayHistory.track_id)
     ).subquery()
     q = (

@@ -36,12 +36,13 @@ def _primary_artist_name(artist_name: str) -> str:
     return s or artist_name
 
 
-async def get_artist_image_url(artist_name: str) -> str | None:
+async def get_artist_image_url(artist_name: str, api_key: str | None = None) -> str | None:
     """
     Fetch artist image URL from Last.fm artist.getInfo.
     Returns the medium-sized image URL (e.g. 160px) or None if not found.
     """
-    if not settings.lastfm_api_key or not artist_name:
+    key = api_key or settings.lastfm_api_key
+    if not key or not artist_name:
         return None
     primary = _primary_artist_name(artist_name)
     try:
@@ -51,7 +52,7 @@ async def get_artist_image_url(artist_name: str) -> str | None:
                 params={
                     "method": "artist.getInfo",
                     "artist": primary,
-                    "api_key": settings.lastfm_api_key,
+                    "api_key": key,
                     "format": "json",
                     "autocorrect": 1,
                 },

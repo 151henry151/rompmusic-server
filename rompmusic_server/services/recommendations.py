@@ -38,9 +38,12 @@ def _normalize_for_match(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
-async def _fetch_lastfm_similar(artist: str, track: str, limit: int = 30) -> list[tuple[str, str, float]]:
+async def _fetch_lastfm_similar(
+    artist: str, track: str, limit: int = 30, api_key: str | None = None
+) -> list[tuple[str, str, float]]:
     """Fetch similar tracks from Last.fm. Returns [(artist, track, match_score), ...]."""
-    if not settings.lastfm_api_key:
+    key = api_key or settings.lastfm_api_key
+    if not key:
         return []
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -50,7 +53,7 @@ async def _fetch_lastfm_similar(artist: str, track: str, limit: int = 30) -> lis
                     "method": "track.getSimilar",
                     "artist": artist,
                     "track": track,
-                    "api_key": settings.lastfm_api_key,
+                    "api_key": key,
                     "format": "json",
                     "limit": limit,
                     "autocorrect": 1,
@@ -202,11 +205,16 @@ async def get_similar_tracks(
     track_id: int,
     user_id: int | None,
     limit: int = 20,
+    lastfm_api_key: str | None = None,
 ) -> list[tuple[Track, str | None, str | None]]:
     """
     Hybrid similar tracks: Last.fm + our collaborative filtering + content-based.
     Blends scores and deduplicates, favoring external data when available.
     """
+    if lastfm_api_key is None:
+        from rompmusic_server.services.server_settings import get_api_keys
+        api_keys = await get_api_keys(db)
+        lastfm_api_key = api_keys.get("lastfm") or settings.lastfm_api_key
     # Get seed track
     result = await db.execute(
         select(Track, Artist.name)
@@ -222,7 +230,9 @@ async def get_similar_tracks(
     combined: dict[int, float] = {}
 
     # 1. Last.fm (weight 2.0 - strong signal when we get matches)
-    lastfm_similar = await _fetch_lastfm_similar(artist_name or "", track.title or "", limit=limit * 2)
+    lastfm_similar = await _fetch_lastfm_similar(
+        artist_name or "", track.title or "", limit=limit * 2, api_key=lastfm_api_key
+    )
     lastfm_matched = await _match_lastfm_to_library(db, lastfm_similar, track_id, limit)
     for tid, score in lastfm_matched:
         combined[tid] = combined.get(tid, 0) + score * 2.0

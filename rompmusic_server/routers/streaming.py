@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import select
 
-from rompmusic_server.auth import get_optional_user_id_for_stream
+from rompmusic_server.auth import get_user_id_or_anonymous
 from rompmusic_server.config import settings
 from rompmusic_server.database import get_db
 from rompmusic_server.models import PlayHistory, Track
@@ -63,22 +63,22 @@ async def stream_track(
     track_id: int,
     request: Request,
     format: str | None = "original",
-    user_id: int | None = Depends(get_optional_user_id_for_stream),
+    user_or_anon: tuple[int | None, str | None] = Depends(get_user_id_or_anonymous),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """
     Stream a track with HTTP Range request support for seeking.
     Clients send Range: bytes=0- for partial content.
-    Auth optional: if token provided, records play history.
+    Auth optional: records play history for user or anonymous (when public server).
     """
     result = await db.execute(select(Track).where(Track.id == track_id))
     track = result.scalar_one_or_none()
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
 
-    # Record play history when authenticated (fire-and-forget)
-    if user_id is not None:
-        db.add(PlayHistory(user_id=user_id, track_id=track_id))
+    user_id, anonymous_id = user_or_anon
+    if user_id is not None or anonymous_id is not None:
+        db.add(PlayHistory(user_id=user_id, anonymous_id=anonymous_id, track_id=track_id))
     try:
         await db.flush()
     except Exception:

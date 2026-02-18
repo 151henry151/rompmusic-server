@@ -50,4 +50,24 @@ async def init_db() -> None:
                 ALTER TABLE albums ADD COLUMN IF NOT EXISTS has_artwork BOOLEAN DEFAULT NULL
             """))
         except Exception:
-            pass  # Column may already exist or DB doesn't support IF NOT EXISTS
+            pass
+        # Migration: play_history support anonymous (public server)
+        try:
+            await conn.execute(text("""
+                ALTER TABLE play_history ADD COLUMN IF NOT EXISTS anonymous_id VARCHAR(64)
+            """))
+            await conn.execute(text("""
+                ALTER TABLE play_history ALTER COLUMN user_id DROP NOT NULL
+            """))
+        except Exception:
+            pass
+        try:
+            await conn.execute(text("""
+                ALTER TABLE play_history DROP CONSTRAINT IF EXISTS play_history_user_or_anonymous
+            """))
+            await conn.execute(text("""
+                ALTER TABLE play_history ADD CONSTRAINT play_history_user_or_anonymous
+                CHECK ((user_id IS NOT NULL) OR (anonymous_id IS NOT NULL))
+            """))
+        except Exception:
+            pass

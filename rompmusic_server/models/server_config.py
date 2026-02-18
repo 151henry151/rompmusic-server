@@ -8,6 +8,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from rompmusic_server.models.base import Base
 
+# Default server settings (registration, etc.) when none is stored.
+# Optional keys (e.g. auto_scan_interval_hours): when missing, env is used.
+DEFAULT_SERVER_SETTINGS = {
+    "registration_enabled": True,
+    "registration_requires_approval": False,
+    "public_server_enabled": False,
+}
+
 # Default client settings policy when none is stored
 DEFAULT_CLIENT_SETTINGS = {
     "group_artists_by_capitalization": {"visible": True, "default": True},

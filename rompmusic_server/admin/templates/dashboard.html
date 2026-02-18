@@ -31,6 +31,94 @@
         <div id="scan-result"></div>
     </div>
 
+    <div class="card">
+        <h2>Users</h2>
+        <p style="color: #94a3b8; font-size: 0.9rem;">Approve pending registrations or send password reset emails.</p>
+        <div id="users-loading" style="color: #94a3b8;">Loading...</div>
+        <div id="users-content" style="display: none; overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 0.5rem;">
+                <thead>
+                    <tr style="border-bottom: 1px solid #334155;">
+                        <th style="text-align: left; padding: 0.5rem;">Username</th>
+                        <th style="text-align: left; padding: 0.5rem;">Email</th>
+                        <th style="text-align: left; padding: 0.5rem;">Status</th>
+                        <th style="text-align: left; padding: 0.5rem;">Role</th>
+                        <th style="text-align: left; padding: 0.5rem;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="users-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Server Settings</h2>
+        <p style="color: #94a3b8; font-size: 0.9rem;">Registration, library schedule, public access, and API keys. Changes take effect immediately (scheduler re-reads intervals).</p>
+        <div id="server-config-loading" style="color: #94a3b8;">Loading...</div>
+        <div id="server-config-content" style="display: none;">
+            <form id="server-settings-form" style="margin-top: 0.5rem;">
+                <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem 0; color: #cbd5e1;">Registration</h3>
+                <p style="margin: 0.5rem 0;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" name="registration_enabled" id="server-registration-enabled">
+                        <span>Allow new user registration</span>
+                    </label>
+                </p>
+                <p style="margin: 0.5rem 0;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" name="registration_requires_approval" id="server-registration-approval">
+                        <span>Require admin approval after email verification</span>
+                    </label>
+                </p>
+                <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem 0; color: #cbd5e1;">Public server</h3>
+                <p style="margin: 0.5rem 0;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" name="public_server_enabled" id="server-public-enabled">
+                        <span>Allow unauthenticated access (cookie-based recently played)</span>
+                    </label>
+                </p>
+                <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem 0; color: #cbd5e1;">Library schedule</h3>
+                <p style="margin: 0.5rem 0;">
+                    <label>Auto scan interval (hours, 0 = disabled)</label><br>
+                    <input type="number" name="auto_scan_interval_hours" id="server-scan-interval" min="0" step="0.5" style="width: 6rem;">
+                </p>
+                <p style="margin: 0.5rem 0;">
+                    <label>Beets fetch-art interval (hours, 0 = disabled)</label><br>
+                    <input type="number" name="beets_auto_interval_hours" id="server-beets-interval" min="0" step="0.5" style="width: 6rem;">
+                </p>
+                <p style="margin: 0.5rem 0;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" name="run_beets_after_scan" id="server-run-beets-after-scan">
+                        <span>Run beets fetch-art after each library scan</span>
+                    </label>
+                </p>
+                <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem 0; color: #cbd5e1;">API keys</h3>
+                <p style="margin: 0.5rem 0;">
+                    <label>Last.fm API key (leave blank or *** to keep current)</label><br>
+                    <input type="password" name="api_key_lastfm" id="server-api-lastfm" placeholder="Optional" style="width: 20rem;">
+                </p>
+                <p style="margin: 0.5rem 0;">
+                    <label>Beets API key (optional; leave blank to keep)</label><br>
+                    <input type="password" name="api_key_beets" id="server-api-beets" placeholder="Optional" style="width: 20rem;">
+                </p>
+                <p style="margin-top: 1rem;">
+                    <button type="submit">Save server settings</button>
+                    <span id="server-settings-msg" style="margin-left: 1rem;"></span>
+                </p>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Usage statistics</h2>
+        <div id="stats-loading" style="color: #94a3b8;">Loading...</div>
+        <div id="stats-content" style="display: none;">
+            <p style="color: #cbd5e1;">Total users: <strong id="stats-users-total"></strong></p>
+            <p style="color: #cbd5e1;">Pending approval: <strong id="stats-users-pending"></strong></p>
+            <p style="color: #cbd5e1;">Total plays recorded: <strong id="stats-plays-total"></strong></p>
+        </div>
+    </div>
+
     <script>
     async function startScan() {
         const btn = document.getElementById('scan-btn');
@@ -116,6 +204,7 @@
         group_artists_by_capitalization: 'Group artists with different capitalization',
         group_collaborations_by_primary: 'Group collaborations by primary artist',
         audio_format: 'Audio quality (format)',
+        albums_artwork_first: 'Show albums with artwork first',
     };
 
     async function loadClientConfig() {
@@ -180,9 +269,137 @@
     });
     }
 
+    async function loadServerConfig() {
+        const loading = document.getElementById('server-config-loading');
+        const content = document.getElementById('server-config-content');
+        try {
+            const resp = await fetch(API_BASE + '/admin/server-config', { credentials: 'same-origin' });
+            if (!resp.ok) throw new Error(resp.status);
+            const data = await resp.json();
+            const ss = data.server_settings || {};
+            document.getElementById('server-registration-enabled').checked = ss.registration_enabled !== false;
+            document.getElementById('server-registration-approval').checked = ss.registration_requires_approval === true;
+            document.getElementById('server-public-enabled').checked = ss.public_server_enabled === true;
+            document.getElementById('server-scan-interval').value = data.auto_scan_interval_hours != null ? data.auto_scan_interval_hours : '';
+            document.getElementById('server-beets-interval').value = data.beets_auto_interval_hours != null ? data.beets_auto_interval_hours : '';
+            document.getElementById('server-run-beets-after-scan').checked = data.run_beets_after_scan === true;
+            document.getElementById('server-api-lastfm').placeholder = (data.api_keys && data.api_keys.lastfm) ? '***' : 'Optional';
+            document.getElementById('server-api-beets').placeholder = (data.api_keys && data.api_keys.beets) ? '***' : 'Optional';
+            loading.style.display = 'none';
+            content.style.display = 'block';
+        } catch (e) {
+            loading.innerHTML = '<span style="color: #f87171;">Failed to load: ' + e.message + '</span>';
+        }
+    }
+
+    function setupServerSettingsForm() {
+        document.getElementById('server-settings-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const msg = document.getElementById('server-settings-msg');
+            const body = {
+                registration_enabled: form.querySelector('[name="registration_enabled"]').checked,
+                registration_requires_approval: form.querySelector('[name="registration_requires_approval"]').checked,
+                public_server_enabled: form.querySelector('[name="public_server_enabled"]').checked,
+                auto_scan_interval_hours: parseFloat(form.querySelector('[name="auto_scan_interval_hours"]').value) || 0,
+                beets_auto_interval_hours: parseFloat(form.querySelector('[name="beets_auto_interval_hours"]').value) || 0,
+                run_beets_after_scan: form.querySelector('[name="run_beets_after_scan"]').checked,
+            };
+            const lastfmVal = form.querySelector('[name="api_key_lastfm"]').value.trim();
+            const beetsVal = form.querySelector('[name="api_key_beets"]').value.trim();
+            if (lastfmVal || beetsVal) {
+                body.api_keys = {};
+                if (lastfmVal) body.api_keys.lastfm = lastfmVal;
+                if (beetsVal) body.api_keys.beets = beetsVal;
+            }
+            try {
+                const resp = await fetch(API_BASE + '/admin/server-config', {
+                    method: 'PUT',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!resp.ok) throw new Error(resp.status);
+                msg.innerHTML = '<span style="color: #4ade80;">Saved.</span>';
+                setTimeout(function() { msg.innerHTML = ''; }, 2000);
+                loadServerConfig();
+            } catch (err) {
+                msg.innerHTML = '<span style="color: #f87171;">Save failed: ' + err.message + '</span>';
+            }
+        });
+    }
+
+    async function loadStats() {
+        const loading = document.getElementById('stats-loading');
+        const content = document.getElementById('stats-content');
+        try {
+            const resp = await fetch(API_BASE + '/admin/stats', { credentials: 'same-origin' });
+            if (!resp.ok) throw new Error(resp.status);
+            const data = await resp.json();
+            document.getElementById('stats-users-total').textContent = data.users_total ?? 0;
+            document.getElementById('stats-users-pending').textContent = data.users_pending_approval ?? 0;
+            document.getElementById('stats-plays-total').textContent = data.plays_total ?? 0;
+            loading.style.display = 'none';
+            content.style.display = 'block';
+        } catch (e) {
+            loading.innerHTML = '<span style="color: #f87171;">Failed to load: ' + e.message + '</span>';
+        }
+    }
+
+    async function loadUsers() {
+        const loading = document.getElementById('users-loading');
+        const content = document.getElementById('users-content');
+        const tbody = document.getElementById('users-tbody');
+        try {
+            const resp = await fetch(API_BASE + '/admin/users', { credentials: 'same-origin' });
+            if (!resp.ok) throw new Error(resp.status);
+            const users = await resp.json();
+            tbody.innerHTML = users.map(function(u) {
+                const status = u.is_active ? '<span style="color: #4ade80;">Active</span>' : '<span style="color: #fbbf24;">Pending approval</span>';
+                const role = u.is_admin ? 'Admin' : 'User';
+                let actions = '';
+                if (!u.is_active) {
+                    actions += '<button type="button" class="user-approve" data-id="' + u.id + '" style="margin-right: 0.5rem;">Approve</button>';
+                }
+                actions += '<button type="button" class="user-pw-reset" data-id="' + u.id + '">Send password reset</button>';
+                return '<tr style="border-bottom: 1px solid #334155;"><td style="padding: 0.5rem;">' + escapeHtml(u.username) + '</td><td style="padding: 0.5rem;">' + escapeHtml(u.email) + '</td><td style="padding: 0.5rem;">' + status + '</td><td style="padding: 0.5rem;">' + role + '</td><td style="padding: 0.5rem;">' + actions + '</td></tr>';
+            }).join('');
+            loading.style.display = 'none';
+            content.style.display = 'block';
+            tbody.querySelectorAll('.user-approve').forEach(function(btn) {
+                btn.addEventListener('click', function() { approveUser(parseInt(btn.getAttribute('data-id'), 10)); });
+            });
+            tbody.querySelectorAll('.user-pw-reset').forEach(function(btn) {
+                btn.addEventListener('click', function() { sendPasswordReset(parseInt(btn.getAttribute('data-id'), 10)); });
+            });
+        } catch (e) {
+            loading.innerHTML = '<span style="color: #f87171;">Failed to load: ' + escapeHtml(e.message) + '</span>';
+        }
+    }
+    function escapeHtml(s) { return (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+    async function approveUser(id) {
+        try {
+            const resp = await fetch(API_BASE + '/admin/users/' + id + '/approve', { method: 'POST', credentials: 'same-origin' });
+            if (!resp.ok) throw new Error(resp.status);
+            loadUsers();
+        } catch (e) { alert('Failed: ' + e.message); }
+    }
+    async function sendPasswordReset(id) {
+        try {
+            const resp = await fetch(API_BASE + '/admin/users/' + id + '/send-password-reset', { method: 'POST', credentials: 'same-origin' });
+            if (!resp.ok) throw new Error(resp.status);
+            const data = await resp.json();
+            alert(data.message || 'Sent.');
+        } catch (e) { alert('Failed: ' + e.message); }
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
         loadClientConfig();
         setupClientConfigForm();
+        loadServerConfig();
+        setupServerSettingsForm();
+        loadUsers();
+        loadStats();
     });
     </script>
 

@@ -166,7 +166,13 @@ def start_background_scan(app: FastAPI) -> bool:
                 state["done"] = True
 
                 from rompmusic_server.config import settings
-                if getattr(settings, "run_beets_after_scan", False):
+                from rompmusic_server.services.server_settings import get_server_settings, get_effective_library_config
+                s = await get_server_settings(session)
+                effective = get_effective_library_config(
+                    s, settings.auto_scan_interval_hours, settings.beets_auto_interval_hours,
+                    getattr(settings, "run_beets_after_scan", False),
+                )
+                if effective.get("run_beets_after_scan", False):
                     beet = shutil.which("beet") or "beet"
                     music_path = str(settings.music_path)
                     try:

@@ -31,9 +31,13 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     await init_db()
     from rompmusic_server.config import settings
+    from rompmusic_server.database import async_session_maker
+    from rompmusic_server.services.server_settings import get_server_settings, get_effective_library_config
+
+    # Check Last.fm (env or DB checked at request time)
     if not settings.lastfm_api_key:
         logger.info(
-            "LASTFM_API_KEY not set - artist images will show placeholders. "
+            "LASTFM_API_KEY not set - set in env or Admin → Server Settings. "
             "Get a free key at https://last.fm/api/account/create"
         )
     app.state.scan_task = None
@@ -41,44 +45,55 @@ async def lifespan(app: FastAPI):
         "processed": 0, "total": 0, "current_file": None,
         "artists": 0, "albums": 0, "tracks": 0, "done": False, "error": None,
     }
-    if settings.auto_scan_interval_hours > 0:
-        interval_sec = settings.auto_scan_interval_hours * 3600
 
-        async def scheduled_scan_loop():
-            while True:
-                await asyncio.sleep(interval_sec)
-                if admin_views.start_background_scan(app):
-                    logger.info("Scheduled library scan started")
+    async def scheduled_scan_loop():
+        while True:
+            async with async_session_maker() as db:
+                s = await get_server_settings(db)
+            env_scan = settings.auto_scan_interval_hours
+            env_beets = settings.beets_auto_interval_hours
+            env_run_beets = getattr(settings, "run_beets_after_scan", False)
+            effective = get_effective_library_config(s, env_scan, env_beets, env_run_beets)
+            interval_h = effective["auto_scan_interval_hours"]
+            if interval_h <= 0:
+                interval_h = 24.0  # check again later
+            await asyncio.sleep(interval_h * 3600)
+            if admin_views.start_background_scan(app):
+                logger.info("Scheduled library scan started")
 
-        asyncio.create_task(scheduled_scan_loop())
-        logger.info("Auto library scan enabled every %.1f hours", settings.auto_scan_interval_hours)
+    asyncio.create_task(scheduled_scan_loop())
 
-    if settings.beets_auto_interval_hours > 0:
+    async def beets_loop():
         import shutil
-        beets_interval_sec = settings.beets_auto_interval_hours * 3600
+        beet = shutil.which("beet") or "beet"
+        music_path = str(settings.music_path)
+        while True:
+            async with async_session_maker() as db:
+                s = await get_server_settings(db)
+            env_scan = settings.auto_scan_interval_hours
+            env_beets = settings.beets_auto_interval_hours
+            env_run_beets = getattr(settings, "run_beets_after_scan", False)
+            effective = get_effective_library_config(s, env_scan, env_beets, env_run_beets)
+            interval_h = effective["beets_auto_interval_hours"]
+            if interval_h <= 0:
+                interval_h = 24.0
+            await asyncio.sleep(interval_h * 3600)
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    beet, "fetch-art", "-y",
+                    cwd=music_path,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await proc.communicate()
+                if proc.returncode == 0:
+                    logger.info("Beets fetch-art completed")
+                else:
+                    logger.warning("Beets fetch-art exited %s: %s", proc.returncode, (stderr or b"").decode()[:200])
+            except Exception as e:
+                logger.warning("Beets fetch-art failed: %s", e)
 
-        async def beets_loop():
-            beet = shutil.which("beet") or "beet"
-            music_path = str(settings.music_path)
-            while True:
-                await asyncio.sleep(beets_interval_sec)
-                try:
-                    proc = await asyncio.create_subprocess_exec(
-                        beet, "fetch-art", "-y",
-                        cwd=music_path,
-                        stdout=asyncio.subprocess.DEVNULL,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    _, stderr = await proc.communicate()
-                    if proc.returncode == 0:
-                        logger.info("Beets fetch-art completed")
-                    else:
-                        logger.warning("Beets fetch-art exited %s: %s", proc.returncode, (stderr or b"").decode()[:200])
-                except Exception as e:
-                    logger.warning("Beets fetch-art failed: %s", e)
-
-        asyncio.create_task(beets_loop())
-        logger.info("Beets fetch-art enabled every %.1f hours", settings.beets_auto_interval_hours)
+    asyncio.create_task(beets_loop())
     yield
     # shutdown
 
@@ -108,6 +123,16 @@ async def log_requests(request: Request, call_next):
     response = await call_next(request)
     duration_ms = (time.perf_counter() - start) * 1000
     logger.info("%s %s %s %.1fms", request.method, request.url.path, response.status_code, duration_ms)
+    # Set anonymous cookie for public server when dependency set request.state.anonymous_id_to_set
+    if getattr(request.state, "anonymous_id_to_set", None):
+        from rompmusic_server.auth import ANONYMOUS_COOKIE_MAX_AGE, ANONYMOUS_COOKIE_NAME
+        response.set_cookie(
+            ANONYMOUS_COOKIE_NAME,
+            request.state.anonymous_id_to_set,
+            max_age=ANONYMOUS_COOKIE_MAX_AGE,
+            httponly=True,
+            samesite="lax",
+        )
     return response
 
 # API v1

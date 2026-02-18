@@ -24,6 +24,7 @@ from rompmusic_server.api.schemas import (
     VerifyEmailRequest,
 )
 from rompmusic_server.services.email import send_email
+from rompmusic_server.services.server_settings import get_server_settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -53,6 +54,12 @@ async def register(
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     """Create a new user account. User must verify email before logging in."""
+    server_settings = await get_server_settings(db)
+    if not server_settings.get("registration_enabled", True):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Registration is disabled",
+        )
     result = await db.execute(select(User).where(User.username == data.username))
     if result.scalar_one_or_none():
         raise HTTPException(
@@ -110,10 +117,17 @@ async def verify_email(
     vc = result.scalar_one_or_none()
     if not vc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired code")
-    user.is_active = True
+    server_settings = await get_server_settings(db)
+    if server_settings.get("registration_requires_approval", False):
+        # Leave is_active=False until an admin approves the user
+        pass
+    else:
+        user.is_active = True
     await db.execute(delete(VerificationCode).where(VerificationCode.user_id == user.id))
     await db.commit()
-    return {"message": "Email verified. You can now sign in."}
+    if user.is_active:
+        return {"message": "Email verified. You can now sign in."}
+    return {"message": "Email verified. Your account is pending admin approval."}
 
 
 @router.post("/forgot-password", dependencies=[Depends(rate_limit_auth_dep)])

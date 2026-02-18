@@ -4,7 +4,7 @@
 """Authentication: JWT and password hashing."""
 
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import Request
 from jose import JWTError, jwt
@@ -13,6 +13,10 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from rompmusic_server.config import settings
+from rompmusic_server.database import get_db
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -126,3 +130,44 @@ async def get_optional_user_id_for_stream(
         return None
     user_id = payload.get("sub")
     return int(user_id) if user_id else None
+
+
+# Cookie name for anonymous (public server) play history
+ANONYMOUS_COOKIE_NAME = "rompmusic_anon_id"
+ANONYMOUS_COOKIE_MAX_AGE = 365 * 24 * 3600  # 1 year
+
+
+async def get_user_id_or_anonymous(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: "AsyncSession" = Depends(get_db),
+) -> tuple[int | None, str | None]:
+    """
+    Return (user_id, anonymous_id). One may be set when public server is enabled.
+    When anonymous and no cookie yet, sets request.state.anonymous_id_to_set for middleware to set cookie.
+    """
+    import uuid
+    from rompmusic_server.services.server_settings import get_server_settings
+
+    token = None
+    if credentials:
+        token = credentials.credentials
+    elif hasattr(request, "cookies") and request.cookies.get("admin_token"):
+        token = request.cookies.get("admin_token")
+    elif request.query_params.get("token"):
+        token = request.query_params.get("token")
+    if token:
+        payload = decode_token(token)
+        if payload and payload.get("sub"):
+            return (int(payload["sub"]), None)
+
+    # No JWT: check public server and anonymous cookie
+    server_settings = await get_server_settings(db)
+    if not server_settings.get("public_server_enabled", False):
+        return (None, None)
+    cookie_val = request.cookies.get(ANONYMOUS_COOKIE_NAME) if hasattr(request, "cookies") else None
+    if cookie_val:
+        return (None, cookie_val)
+    new_id = str(uuid.uuid4())
+    request.state.anonymous_id_to_set = new_id
+    return (None, new_id)
