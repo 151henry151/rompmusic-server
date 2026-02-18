@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     auto_scan_interval_hours: float = 0
     # Run beets (e.g. fetch-art) in the music directory every N hours (0 = disabled). Example: 24 for daily.
     beets_auto_interval_hours: float = 0
+    # Run beets fetch-art once after each library scan completes (when True).
+    run_beets_after_scan: bool = False
 
     # Server
     host: str = "0.0.0.0"

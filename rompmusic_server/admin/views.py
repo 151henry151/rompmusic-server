@@ -5,6 +5,7 @@
 
 import asyncio
 import json
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, Form, Request
@@ -75,6 +76,7 @@ async def admin_dashboard(
     db: AsyncSession = Depends(get_db),
 ):
     """Admin dashboard with library stats."""
+    from rompmusic_server.config import settings
     artists_count = await db.scalar(select(func.count()).select_from(Artist)) or 0
     albums_count = await db.scalar(select(func.count()).select_from(Album)) or 0
     tracks_count = await db.scalar(select(func.count()).select_from(Track)) or 0
@@ -90,6 +92,9 @@ async def admin_dashboard(
             "tracks_count": tracks_count,
             "users_count": users_count,
             "api_base": _api_base(),
+            "auto_scan_interval_hours": settings.auto_scan_interval_hours,
+            "beets_auto_interval_hours": settings.beets_auto_interval_hours,
+            "run_beets_after_scan": getattr(settings, "run_beets_after_scan", False),
         },
     )
 
@@ -98,13 +103,13 @@ async def admin_dashboard(
 async def admin_trigger_scan(
     request: Request,
     _user: User = Depends(require_admin_user),
-    db: AsyncSession = Depends(get_db),
 ):
-    """Trigger library scan. Returns HTML partial for HTMX (non-streaming fallback)."""
-    counts = await scan_library(db)
+    """Start library scan in background. Returns HTML partial. Use POST /server/scan/stream for progress."""
+    started = start_background_scan(request.app)
+    state = _get_scan_state(request.app)
     return templates.TemplateResponse(
         "partials/scan_result.html",
-        {"request": request, "counts": counts},
+        {"request": request, "counts": state, "started": started},
     )
 
 
@@ -124,6 +129,11 @@ def _get_scan_state(app: FastAPI) -> dict:
     if not hasattr(app.state, "scan_task"):
         app.state.scan_task = None
     return app.state.scan_progress
+
+
+def get_scan_progress(app: FastAPI) -> dict:
+    """Return current scan progress (read-only copy)."""
+    return dict(_get_scan_state(app))
 
 
 def start_background_scan(app: FastAPI) -> bool:
@@ -154,6 +164,21 @@ def start_background_scan(app: FastAPI) -> bool:
                 await scan_library(session, on_progress=on_progress)
                 await session.commit()
                 state["done"] = True
+
+                from rompmusic_server.config import settings
+                if getattr(settings, "run_beets_after_scan", False):
+                    beet = shutil.which("beet") or "beet"
+                    music_path = str(settings.music_path)
+                    try:
+                        proc = await asyncio.create_subprocess_exec(
+                            beet, "fetch-art", "-y",
+                            cwd=music_path,
+                            stdout=asyncio.subprocess.DEVNULL,
+                            stderr=asyncio.subprocess.PIPE,
+                        )
+                        await proc.communicate()
+                    except Exception:
+                        pass
             except Exception as e:
                 state["done"] = True
                 state["error"] = str(e)

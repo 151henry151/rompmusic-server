@@ -16,6 +16,15 @@
             <div class="stat"><span class="stat-value">{{ tracks_count }}</span><br>Tracks</div>
             <div class="stat"><span class="stat-value">{{ users_count }}</span><br>Users</div>
         </div>
+        {% if auto_scan_interval_hours and auto_scan_interval_hours > 0 %}
+        <p style="margin-top: 0.5rem; color: #64748b; font-size: 0.9rem;">Auto scan: every {{ auto_scan_interval_hours }} hour(s).</p>
+        {% endif %}
+        {% if beets_auto_interval_hours and beets_auto_interval_hours > 0 %}
+        <p style="color: #64748b; font-size: 0.9rem;">Beets fetch-art: every {{ beets_auto_interval_hours }} hour(s).</p>
+        {% endif %}
+        {% if run_beets_after_scan %}
+        <p style="color: #64748b; font-size: 0.9rem;">Beets fetch-art runs after each scan.</p>
+        {% endif %}
         <p style="margin-top: 1rem;">
             <button id="scan-btn" onclick="startScan()">Scan Library</button>
         </p>

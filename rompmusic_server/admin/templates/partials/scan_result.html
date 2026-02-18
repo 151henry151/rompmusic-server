@@ -1,1 +1,7 @@
+{% if started %}
+<p style="color: #4ade80;">Scan started in background. Use "Scan Library" with stream for progress.</p>
+{% elif counts.done %}
 <p style="color: #4ade80;">Scan complete. Artists: {{ counts.artists }}, Albums: {{ counts.albums }}, Tracks: {{ counts.tracks }}</p>
+{% else %}
+<p style="color: #94a3b8;">Scan already in progress.</p>
+{% endif %}

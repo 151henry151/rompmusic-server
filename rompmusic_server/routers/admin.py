@@ -5,16 +5,16 @@
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from rompmusic_server.admin import views as admin_views
 from rompmusic_server.auth import get_current_user_id
 from rompmusic_server.database import get_db
 from rompmusic_server.models import User
 from rompmusic_server.models.server_config import DEFAULT_CLIENT_SETTINGS, ServerConfig
-from rompmusic_server.services.scanner import scan_library
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -33,12 +33,35 @@ async def require_admin(
 
 @router.post("/scan")
 async def trigger_scan(
+    request: Request,
     _user_id: int = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Trigger library scan. Admin only."""
-    counts = await scan_library(db)
-    return {"status": "ok", "counts": counts}
+    """Start library scan in background. Admin only. Poll GET /admin/scan/status for progress."""
+    started = admin_views.start_background_scan(request.app)
+    return {"status": "started" if started else "already_running"}
+
+
+@router.get("/scan/status")
+async def get_scan_status(
+    request: Request,
+    _user_id: int = Depends(require_admin),
+) -> dict:
+    """Return current scan progress. Admin only."""
+    state = admin_views.get_scan_progress(request.app)
+    return state
+
+
+@router.get("/server-config")
+async def get_server_config(
+    _user_id: int = Depends(require_admin),
+) -> dict:
+    """Return read-only server config (auto scan, beets). Admin only."""
+    from rompmusic_server.config import settings
+    return {
+        "auto_scan_interval_hours": settings.auto_scan_interval_hours,
+        "beets_auto_interval_hours": settings.beets_auto_interval_hours,
+        "run_beets_after_scan": getattr(settings, "run_beets_after_scan", False),
+    }
 
 
 class ClientSettingsPolicy(BaseModel):
