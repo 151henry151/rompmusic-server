@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from rompmusic_server.admin import views as admin_views
 from rompmusic_server.auth import get_current_user_id
 from rompmusic_server.database import get_db
-from rompmusic_server.models import PasswordResetToken, User
+from rompmusic_server.models import Invitation, PasswordResetToken, User
 from rompmusic_server.models.server_config import DEFAULT_CLIENT_SETTINGS, ServerConfig
 from rompmusic_server.services.server_settings import (
     get_api_keys,
@@ -21,8 +21,17 @@ from rompmusic_server.services.server_settings import (
     get_server_settings,
 )
 from rompmusic_server.services.email import send_email
+from rompmusic_server.auth import hash_password
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+class InviteCreate(BaseModel):
+    """Request body for creating an invitation. If username is set, password defaults to same as username."""
+
+    email: str  # validated in endpoint
+    username: str | None = None
+    message: str | None = None  # optional personal message included in email
 
 
 async def require_admin(
@@ -146,6 +155,98 @@ async def send_password_reset_to_user(
         f"Your password reset code is: {code}\n\nEnter this code in the app along with your new password.\n\nThe code expires in 1 hour.",
     )
     return {"message": "Password reset email sent."}
+
+
+@router.post("/users/{user_id}/resend-welcome")
+async def resend_welcome_email(
+    user_id: int,
+    _admin_id: int = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Send a welcome email to the user with their username and login link. Admin only. Does not include password (use password reset if needed)."""
+    from rompmusic_server.config import settings
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    base = (settings.app_base_url or settings.base_url or "http://localhost:8080").rstrip("/")
+    body_text = (
+        f"Welcome to RompMusic.\n\n"
+        f"Your username is: {user.username}\n\n"
+        f"Log in at: {base}\n\n"
+        f"If you don't remember your password, use the Forgot password link on the login screen."
+    )
+    await send_email(
+        user.email,
+        "Welcome to RompMusic",
+        body_text,
+    )
+    return {"message": "Welcome email sent."}
+
+
+@router.post("/invite")
+async def create_invitation(
+    body: InviteCreate,
+    admin_id: int = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Create an invitation and send email. Admin only. If username is set, password defaults to same as username and invitee is told both; else invitee chooses username and password at signup."""
+    import secrets
+    from datetime import datetime, timezone, timedelta
+    from rompmusic_server.config import settings
+
+    email = body.email.strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email required")
+    existing = await db.execute(select(User).where(User.email == email))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="User already exists with this email")
+    existing_inv = await db.execute(
+        select(Invitation).where(Invitation.email == email, Invitation.used_at.is_(None), Invitation.expires_at > datetime.now(timezone.utc))
+    )
+    if existing_inv.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Pending invitation already exists for this email")
+
+    username = body.username.strip() if body.username else None
+    # When admin sets username, password defaults to same as username
+    password_hash = hash_password(username) if username else None
+
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    inv = Invitation(
+        email=email,
+        token=token,
+        username=username,
+        password_hash=password_hash,
+        expires_at=expires_at,
+        invited_by_id=admin_id,
+    )
+    db.add(inv)
+    await db.flush()
+
+    base = (settings.app_base_url or settings.base_url or "http://localhost:8080").rstrip("/")
+    link = f"{base}/invite?token={token}"
+    if username:
+        body_text = (
+            f"You have been invited to RompMusic.\n\n"
+            f"Your username is: {username}\n"
+            f"Your password is: {username} (same as username). You can change it after logging in.\n\n"
+            f"Click the link below to activate your account:\n\n{link}\n\nThe link expires in 7 days."
+        )
+    else:
+        body_text = (
+            f"You have been invited to RompMusic. Click the link below to create your account (you will choose a username and password):\n\n{link}\n\nThe link expires in 7 days."
+        )
+    if body.message and body.message.strip():
+        body_text += f"\n\n---\nPersonal message:\n\n{body.message.strip()}"
+    await send_email(
+        email,
+        "You're invited to RompMusic",
+        body_text,
+    )
+    await db.commit()
+    return {"message": "Invitation sent.", "email": email}
 
 
 @router.get("/server-config")

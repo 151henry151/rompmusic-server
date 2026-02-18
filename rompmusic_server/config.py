@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     smtp_user: str | None = None
     smtp_password: str | None = None
     smtp_from: str = "noreply@rompmusic.local"
+    # Base URL for the app (invite links, password reset links). Set APP_BASE_URL in production (e.g. https://rompmusic.com).
     app_base_url: str = "http://localhost:8080"
 
     # Recommendations: Last.fm API (optional; free key at last.fm/api/account/create)

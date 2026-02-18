@@ -13,6 +13,7 @@ from rompmusic_server.models.play_history import PlayHistory
 from rompmusic_server.models.password_reset import PasswordResetToken
 from rompmusic_server.models.server_config import ServerConfig
 from rompmusic_server.models.verification_code import VerificationCode
+from rompmusic_server.models.invitation import Invitation
 
 __all__ = [
     "Base",
@@ -26,4 +27,5 @@ __all__ = [
     "PasswordResetToken",
     "ServerConfig",
     "VerificationCode",
+    "Invitation",
 ]

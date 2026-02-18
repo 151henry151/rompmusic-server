@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (Changes since last release will be listed here)
 
+## [0.1.0-beta.3] - 2026-02-16
+
+### Added
+
+- Resend welcome email: admin can send a welcome email to any user from the dashboard (username + login link; suggests "Forgot password" if needed).
+- Logo and favicon in admin dashboard (static `/logo.png`, favicon in base template).
+
+### Changed
+
+- Invite flow: admin sets only username (no password field); password defaults to the same value as username. Invite email tells the user their username and that password is the same when set, or asks them to choose username and password when opening the link when not set.
+- Dashboard invite form: password field removed; optional username and optional personal message only.
+
 ## [0.1.0-beta.2] - 2026-02-17
 
 ### Added
@@ -45,6 +57,7 @@ First beta release. Part of RompMusic 0.1.0-beta.1.
 
 - Library scan progress stuck at 0% (per-file progress callbacks, SSE-friendly nginx config)
 
-[Unreleased]: https://github.com/151henry151/rompmusic-server/compare/v0.1.0-beta.2...HEAD
+[Unreleased]: https://github.com/151henry151/rompmusic-server/compare/v0.1.0-beta.3...HEAD
+[0.1.0-beta.3]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.0-beta.1

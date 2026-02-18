@@ -2,7 +2,8 @@
 {% block title %}RompMusic Admin - Dashboard{% endblock %}
 {% block content %}
 <div class="container">
-    <nav style="margin-bottom: 2rem;">
+    <nav style="margin-bottom: 2rem; display: flex; align-items: center; gap: 1rem;">
+        <img src="/logo.png" alt="RompMusic" width="32" height="32" style="vertical-align: middle;" />
         <a href="/server/dashboard">Dashboard</a> | <a href="/api/docs">API</a>
     </nav>
     <h1>RompMusic Admin</h1>
@@ -49,6 +50,29 @@
                 <tbody id="users-tbody"></tbody>
             </table>
         </div>
+    </div>
+
+    <div class="card">
+        <h2>Invite user</h2>
+        <p style="color: #94a3b8; font-size: 0.9rem;">Send an invitation email. If you set a username, their password will be the same as the username and the email will tell them both; if you leave username blank, they choose username and password when they open the signup link.</p>
+        <form id="invite-form" style="margin-top: 0.5rem;">
+            <p style="margin: 0.5rem 0;">
+                <label>Email address <span style="color: #94a3b8;">(required)</span></label><br>
+                <input type="email" name="invite_email" id="invite-email" required style="width: 20rem;">
+            </p>
+            <p style="margin: 0.5rem 0;">
+                <label>Username <span style="color: #94a3b8;">(optional – if set, password is the same; they only activate via link)</span></label><br>
+                <input type="text" name="invite_username" id="invite-username" placeholder="Leave blank for invitee to choose" style="width: 20rem;">
+            </p>
+            <p style="margin: 0.5rem 0;">
+                <label>Personal message <span style="color: #94a3b8;">(optional – included in the invitation email)</span></label><br>
+                <textarea name="invite_message" id="invite-message" rows="3" placeholder="Add a personal note for the invitee..." style="width: 100%; max-width: 28rem; resize: vertical;"></textarea>
+            </p>
+            <p style="margin-top: 1rem;">
+                <button type="submit">Send invitation</button>
+                <span id="invite-msg" style="margin-left: 1rem;"></span>
+            </p>
+        </form>
     </div>
 
     <div class="card">
@@ -361,7 +385,8 @@
                 if (!u.is_active) {
                     actions += '<button type="button" class="user-approve" data-id="' + u.id + '" style="margin-right: 0.5rem;">Approve</button>';
                 }
-                actions += '<button type="button" class="user-pw-reset" data-id="' + u.id + '">Send password reset</button>';
+                actions += '<button type="button" class="user-pw-reset" data-id="' + u.id + '" style="margin-right: 0.5rem;">Send password reset</button>';
+                actions += '<button type="button" class="user-resend-welcome" data-id="' + u.id + '">Resend welcome email</button>';
                 return '<tr style="border-bottom: 1px solid #334155;"><td style="padding: 0.5rem;">' + escapeHtml(u.username) + '</td><td style="padding: 0.5rem;">' + escapeHtml(u.email) + '</td><td style="padding: 0.5rem;">' + status + '</td><td style="padding: 0.5rem;">' + role + '</td><td style="padding: 0.5rem;">' + actions + '</td></tr>';
             }).join('');
             loading.style.display = 'none';
@@ -371,6 +396,9 @@
             });
             tbody.querySelectorAll('.user-pw-reset').forEach(function(btn) {
                 btn.addEventListener('click', function() { sendPasswordReset(parseInt(btn.getAttribute('data-id'), 10)); });
+            });
+            tbody.querySelectorAll('.user-resend-welcome').forEach(function(btn) {
+                btn.addEventListener('click', function() { resendWelcomeEmail(parseInt(btn.getAttribute('data-id'), 10)); });
             });
         } catch (e) {
             loading.innerHTML = '<span style="color: #f87171;">Failed to load: ' + escapeHtml(e.message) + '</span>';
@@ -392,6 +420,48 @@
             alert(data.message || 'Sent.');
         } catch (e) { alert('Failed: ' + e.message); }
     }
+    async function resendWelcomeEmail(id) {
+        try {
+            const resp = await fetch(API_BASE + '/admin/users/' + id + '/resend-welcome', { method: 'POST', credentials: 'same-origin' });
+            if (!resp.ok) throw new Error(resp.status);
+            const data = await resp.json();
+            alert(data.message || 'Sent.');
+        } catch (e) { alert('Failed: ' + e.message); }
+    }
+
+    function setupInviteForm() {
+        document.getElementById('invite-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const msg = document.getElementById('invite-msg');
+            const email = form.querySelector('[name="invite_email"]').value.trim();
+            const username = form.querySelector('[name="invite_username"]').value.trim();
+            const message = form.querySelector('[name="invite_message"]').value.trim();
+            const body = { email: email };
+            if (username) body.username = username;
+            if (message) body.message = message;
+            msg.innerHTML = '';
+            try {
+                const resp = await fetch(API_BASE + '/admin/invite', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await resp.json().catch(function() { return {}; });
+                if (!resp.ok) {
+                    msg.innerHTML = '<span style="color: #f87171;">' + (data.detail || resp.status) + '</span>';
+                    return;
+                }
+                msg.innerHTML = '<span style="color: #4ade80;">' + (data.message || 'Sent.') + '</span>';
+                form.reset();
+                loadUsers();
+                setTimeout(function() { msg.innerHTML = ''; }, 3000);
+            } catch (err) {
+                msg.innerHTML = '<span style="color: #f87171;">' + err.message + '</span>';
+            }
+        });
+    }
 
     document.addEventListener('DOMContentLoaded', function() {
         loadClientConfig();
@@ -400,6 +470,7 @@
         setupServerSettingsForm();
         loadUsers();
         loadStats();
+        setupInviteForm();
     });
     </script>
 

@@ -8,11 +8,14 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from rompmusic_server.database import init_db
-from rompmusic_server.routers import auth, config, library, streaming, search, playlists, artwork, admin
+from rompmusic_server.routers import auth, config, library, streaming, search, playlists, artwork, admin, invite
 from rompmusic_server.admin import views as admin_views
 
 logger = logging.getLogger(__name__)
@@ -144,7 +147,21 @@ app.include_router(search.router, prefix="/api/v1")
 app.include_router(playlists.router, prefix="/api/v1")
 app.include_router(artwork.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
+app.include_router(invite.router, prefix="/api/v1")
 app.include_router(admin_views.router)
+
+
+# Logo and static assets (for emails and admin)
+_logo_path = Path(__file__).parent / "static" / "logo.png"
+
+
+@app.get("/logo.png")
+async def logo():
+    """Serve RompMusic logo (used in emails and admin)."""
+    if _logo_path.exists():
+        return FileResponse(_logo_path, media_type="image/png")
+    from fastapi.responses import Response
+    return Response(status_code=404)
 
 
 @app.get("/")
