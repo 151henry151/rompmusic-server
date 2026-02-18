@@ -59,7 +59,7 @@ async def search(
     albums_result = await db.execute(
         select(Album, Artist.name)
         .join(Artist, Album.artist_id == Artist.id)
-        .where(Album.title.ilike(pattern))
+        .where(or_(Album.title.ilike(pattern), Artist.name.ilike(pattern)))
         .limit(limit)
     )
     albums = [
