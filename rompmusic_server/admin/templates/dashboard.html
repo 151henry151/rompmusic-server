@@ -53,6 +53,26 @@
     </div>
 
     <div class="card">
+        <h2>Pending invitations</h2>
+        <p style="color: #94a3b8; font-size: 0.9rem;">Invites not yet used. Resend the invite email if needed.</p>
+        <div id="invitations-loading" style="color: #94a3b8;">Loading...</div>
+        <div id="invitations-content" style="display: none; overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 0.5rem;">
+                <thead>
+                    <tr style="border-bottom: 1px solid #334155;">
+                        <th style="text-align: left; padding: 0.5rem;">Email</th>
+                        <th style="text-align: left; padding: 0.5rem;">Username</th>
+                        <th style="text-align: left; padding: 0.5rem;">Expires</th>
+                        <th style="text-align: left; padding: 0.5rem;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="invitations-tbody"></tbody>
+            </table>
+            <p id="invitations-empty" style="display: none; color: #64748b; margin-top: 0.5rem;">No pending invitations.</p>
+        </div>
+    </div>
+
+    <div class="card">
         <h2>Invite user</h2>
         <p style="color: #94a3b8; font-size: 0.9rem;">Send an invitation email. If you set a username, their password will be the same as the username and the email will tell them both; if you leave username blank, they choose username and password when they open the signup link.</p>
         <form id="invite-form" style="margin-top: 0.5rem;">
@@ -404,6 +424,43 @@
             loading.innerHTML = '<span style="color: #f87171;">Failed to load: ' + escapeHtml(e.message) + '</span>';
         }
     }
+
+    async function loadInvitations() {
+        const loading = document.getElementById('invitations-loading');
+        const content = document.getElementById('invitations-content');
+        const tbody = document.getElementById('invitations-tbody');
+        const empty = document.getElementById('invitations-empty');
+        try {
+            const resp = await fetch(API_BASE + '/admin/invitations', { credentials: 'same-origin' });
+            if (!resp.ok) throw new Error(resp.status);
+            const invitations = await resp.json();
+            if (invitations.length === 0) {
+                tbody.innerHTML = '';
+                empty.style.display = 'block';
+            } else {
+                empty.style.display = 'none';
+                tbody.innerHTML = invitations.map(function(inv) {
+                    const expires = inv.expires_at ? new Date(inv.expires_at).toLocaleDateString() : '—';
+                    return '<tr style="border-bottom: 1px solid #334155;"><td style="padding: 0.5rem;">' + escapeHtml(inv.email) + '</td><td style="padding: 0.5rem;">' + escapeHtml(inv.username || '—') + '</td><td style="padding: 0.5rem;">' + escapeHtml(expires) + '</td><td style="padding: 0.5rem;"><button type="button" class="invitation-resend" data-id="' + inv.id + '">Resend invite email</button></td></tr>';
+                }).join('');
+                tbody.querySelectorAll('.invitation-resend').forEach(function(btn) {
+                    btn.addEventListener('click', function() { resendInviteEmail(parseInt(btn.getAttribute('data-id'), 10)); });
+                });
+            }
+            loading.style.display = 'none';
+            content.style.display = 'block';
+        } catch (e) {
+            loading.innerHTML = '<span style="color: #f87171;">Failed to load: ' + escapeHtml(e.message) + '</span>';
+        }
+    }
+    async function resendInviteEmail(id) {
+        try {
+            const resp = await fetch(API_BASE + '/admin/invitations/' + id + '/resend', { method: 'POST', credentials: 'same-origin' });
+            if (!resp.ok) throw new Error(resp.status);
+            const data = await resp.json();
+            alert(data.message || 'Sent.');
+        } catch (e) { alert('Failed: ' + e.message); }
+    }
     function escapeHtml(s) { return (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
     async function approveUser(id) {
         try {
@@ -456,6 +513,7 @@
                 msg.innerHTML = '<span style="color: #4ade80;">' + (data.message || 'Sent.') + '</span>';
                 form.reset();
                 loadUsers();
+                loadInvitations();
                 setTimeout(function() { msg.innerHTML = ''; }, 3000);
             } catch (err) {
                 msg.innerHTML = '<span style="color: #f87171;">' + err.message + '</span>';
@@ -469,6 +527,7 @@
         loadServerConfig();
         setupServerSettingsForm();
         loadUsers();
+        loadInvitations();
         loadStats();
         setupInviteForm();
     });
