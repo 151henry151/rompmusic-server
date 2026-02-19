@@ -25,10 +25,10 @@ class Settings(BaseSettings):
 
     # Music library
     music_path: Path = Path("/music")
-    # Automated library scan interval in hours (0 = disabled). Example: 24 for daily.
-    auto_scan_interval_hours: float = 0
-    # Run beets (e.g. fetch-art) in the music directory every N hours (0 = disabled). Example: 24 for daily.
-    beets_auto_interval_hours: float = 0
+    # Automated library scan interval in hours (0 = disabled). Default 24 = daily.
+    auto_scan_interval_hours: float = 24
+    # Run beets (e.g. fetch-art) in the music directory every N hours (0 = disabled). Default 24 = daily.
+    beets_auto_interval_hours: float = 24
     # Run beets fetch-art once after each library scan completes (when True).
     run_beets_after_scan: bool = False
 
