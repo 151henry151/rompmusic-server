@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (Changes since last release will be listed here)
 
+## [0.1.0-beta.4] - 2026-02-18
+
+### Added
+
+- **Artwork hash for album grouping** — Each album can store an `artwork_hash` (SHA-256 of the cover image bytes). It is set when artwork is first served (`GET /api/v1/artwork/album/{id}`) and during library scan when embedded art is found. The album list API returns `artwork_hash` so the client can group albums with identical cover art into one entry.
+
+### Changed
+
+- **Default scan and Beets intervals** — `AUTO_SCAN_INTERVAL_HOURS` and `BEETS_AUTO_INTERVAL_HOURS` now default to `24` (daily) instead of `0` (disabled). Set to `0` in config to disable automation.
+
 ## [0.1.0-beta.3] - 2026-02-16
 
 ### Added
@@ -57,7 +67,8 @@ First beta release. Part of RompMusic 0.1.0-beta.1.
 
 - Library scan progress stuck at 0% (per-file progress callbacks, SSE-friendly nginx config)
 
-[Unreleased]: https://github.com/151henry151/rompmusic-server/compare/v0.1.0-beta.3...HEAD
+[Unreleased]: https://github.com/151henry151/rompmusic-server/compare/v0.1.0-beta.4...HEAD
+[0.1.0-beta.4]: https://github.com/151henry151/rompmusic-server/compare/v0.1.0-beta.3...v0.1.0-beta.4
 [0.1.0-beta.3]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.0-beta.1
