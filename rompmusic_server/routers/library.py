@@ -193,6 +193,7 @@ async def list_albums(
                 year=a.year,
                 artwork_path=a.artwork_path,
                 has_artwork=a.has_artwork,
+                artwork_hash=a.artwork_hash,
                 track_count=tc or 0,
                 created_at=a.created_at,
             )
@@ -225,6 +226,7 @@ async def get_album(
         year=album.year,
         artwork_path=album.artwork_path,
         has_artwork=album.has_artwork,
+        artwork_hash=album.artwork_hash,
         track_count=track_count,
         created_at=album.created_at,
     )

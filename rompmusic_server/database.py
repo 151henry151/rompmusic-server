@@ -51,6 +51,13 @@ async def init_db() -> None:
             """))
         except Exception:
             pass
+        # Migration: add artwork_hash for grouping identical album art in library
+        try:
+            await conn.execute(text("""
+                ALTER TABLE albums ADD COLUMN IF NOT EXISTS artwork_hash VARCHAR(64)
+            """))
+        except Exception:
+            pass
         # Migration: play_history support anonymous (public server)
         try:
             await conn.execute(text("""

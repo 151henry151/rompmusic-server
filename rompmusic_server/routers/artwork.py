@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from rompmusic_server.config import settings
 from rompmusic_server.database import get_db
-from rompmusic_server.models import Track
-from rompmusic_server.services.artwork import extract_artwork_from_file
+from rompmusic_server.models import Album, Track
+from rompmusic_server.services.artwork import artwork_hash_from_bytes, extract_artwork_from_file
 
 router = APIRouter(prefix="/artwork", tags=["artwork"])
 
@@ -23,7 +23,8 @@ async def get_album_artwork(
     album_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    """Get album artwork by ID. Extracts from first track's embedded metadata."""
+    """Get album artwork by ID. Extracts from first track's embedded metadata.
+    Stores artwork_hash on the album when missing so the client can group identical art."""
     result = await db.execute(
         select(Track).where(Track.album_id == album_id).order_by(Track.disc_number, Track.track_number).limit(1)
     )
@@ -35,4 +36,9 @@ async def get_album_artwork(
     if not artwork:
         raise HTTPException(status_code=404, detail="No artwork found")
     data, mime = artwork
+    album_result = await db.execute(select(Album).where(Album.id == album_id))
+    album = album_result.scalar_one_or_none()
+    if album is not None and album.artwork_hash is None:
+        album.artwork_hash = artwork_hash_from_bytes(data)
+        await db.flush()
     return Response(content=data, media_type=mime)

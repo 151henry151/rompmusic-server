@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from rompmusic_server.config import settings
 from rompmusic_server.models import Artist, Album, Track
-from rompmusic_server.services.artwork import has_artwork_in_file
+from rompmusic_server.services.artwork import artwork_hash_from_bytes, extract_artwork_from_file, has_artwork_in_file
 
 SUPPORTED_EXTENSIONS = {".mp3", ".flac", ".m4a", ".ogg", ".oga", ".opus"}
 
@@ -218,12 +218,16 @@ async def scan_library(
             session.add(track)
             new_tracks += 1
 
-        # Update album has_artwork when we find embedded art (for No art toggle filtering)
+        # Update album has_artwork and artwork_hash when we find embedded art
         album_result = await session.execute(select(Album).where(Album.id == album_id))
         album = album_result.scalar_one()
         if album.has_artwork is not True:
             has_art = await loop.run_in_executor(None, has_artwork_in_file, file_path)
             album.has_artwork = has_art
+        if album.has_artwork is True and album.artwork_hash is None:
+            artwork = await loop.run_in_executor(None, extract_artwork_from_file, file_path)
+            if artwork:
+                album.artwork_hash = artwork_hash_from_bytes(artwork[0])
 
         seen_tracks.add(rel_path)
 

@@ -21,6 +21,7 @@ class Album(Base, TimestampMixin):
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     artwork_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     has_artwork: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+    artwork_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     beets_id: Mapped[int | None] = mapped_column(Integer, unique=True, nullable=True, index=True)
 
     artist: Mapped["Artist"] = relationship("Artist", back_populates="albums")
