@@ -30,10 +30,22 @@ async def get_album_artwork(
     )
     track = result.scalar_one_or_none()
     if not track:
+        album_result = await db.execute(select(Album).where(Album.id == album_id))
+        album = album_result.scalar_one_or_none()
+        if album is not None and (album.artwork_hash is not None or album.has_artwork is True):
+            album.artwork_hash = None
+            album.has_artwork = False
+            await db.commit()
         raise HTTPException(status_code=404, detail="Album or tracks not found")
     full_path = Path(settings.music_path) / track.file_path
     artwork = extract_artwork_from_file(full_path)
     if not artwork:
+        album_result = await db.execute(select(Album).where(Album.id == album_id))
+        album = album_result.scalar_one_or_none()
+        if album is not None and (album.artwork_hash is not None or album.has_artwork is True):
+            album.artwork_hash = None
+            album.has_artwork = False
+            await db.commit()
         raise HTTPException(status_code=404, detail="No artwork found")
     data, mime = artwork
     album_result = await db.execute(select(Album).where(Album.id == album_id))
