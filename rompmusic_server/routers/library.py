@@ -181,24 +181,29 @@ async def list_albums(
         q = _album_order(q, sort_by, order).offset(skip).limit(limit)
     result = await db.execute(q)
     rows = result.all()
-    out = []
-    for a, an in rows:
-        tc = await db.scalar(select(func.count()).select_from(Track).where(Track.album_id == a.id))
-        out.append(
-            AlbumResponse(
-                id=a.id,
-                title=a.title,
-                artist_id=a.artist_id,
-                artist_name=an,
-                year=a.year,
-                artwork_path=a.artwork_path,
-                has_artwork=a.has_artwork,
-                artwork_hash=a.artwork_hash,
-                track_count=tc or 0,
-                created_at=a.created_at,
-            )
+    if not rows:
+        return []
+    album_ids = [a.id for a, _ in rows]
+    # Single query for all track counts (avoids N+1)
+    count_result = await db.execute(
+        select(Track.album_id, func.count(Track.id).label("tc")).where(Track.album_id.in_(album_ids)).group_by(Track.album_id)
+    )
+    count_by_album = {row[0]: row[1] for row in count_result.all()}
+    return [
+        AlbumResponse(
+            id=a.id,
+            title=a.title,
+            artist_id=a.artist_id,
+            artist_name=an,
+            year=a.year,
+            artwork_path=a.artwork_path,
+            has_artwork=a.has_artwork,
+            artwork_hash=a.artwork_hash,
+            track_count=count_by_album.get(a.id, 0),
+            created_at=a.created_at,
         )
-    return out
+        for a, an in rows
+    ]
 
 
 @router.get("/albums/{album_id}", response_model=AlbumResponse)

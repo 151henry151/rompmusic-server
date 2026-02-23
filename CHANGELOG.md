@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (Changes since last release will be listed here)
 
+## [0.1.0-beta.5] - 2026-02-19
+
+### Changed
+
+- **Artwork endpoint** — When no artwork is found (or album/tracks not found), the handler now **commits** the album update (`artwork_hash` / `has_artwork` cleared) before raising 404, so the correction persists instead of being rolled back. Also clears and commits on “Album or tracks not found” 404.
+- **Stream endpoint** — Defensive error handling: check for missing `track.file_path`; wrap `stat` and file read in `OSError` handling with logging; pass `str(full_path)` to `FileResponse`; top-level try/except logs any uncaught exception and returns 500 with a safe detail so server logs show the real cause of stream failures.
+- **List albums** — Track counts are fetched in a single batched query (by `album_id` in the result set) instead of one query per album (N+1), improving response time for the library page.
+
 ## [0.1.0-beta.4] - 2026-02-18
 
 ### Added
@@ -67,7 +75,8 @@ First beta release. Part of RompMusic 0.1.0-beta.1.
 
 - Library scan progress stuck at 0% (per-file progress callbacks, SSE-friendly nginx config)
 
-[Unreleased]: https://github.com/151henry151/rompmusic-server/compare/v0.1.0-beta.4...HEAD
+[Unreleased]: https://github.com/151henry151/rompmusic-server/compare/v0.1.0-beta.5...HEAD
+[0.1.0-beta.5]: https://github.com/151henry151/rompmusic-server/compare/v0.1.0-beta.4...v0.1.0-beta.5
 [0.1.0-beta.4]: https://github.com/151henry151/rompmusic-server/compare/v0.1.0-beta.3...v0.1.0-beta.4
 [0.1.0-beta.3]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.0-beta.2

@@ -4,6 +4,7 @@
 """Streaming API - serves audio with HTTP range request support."""
 
 import asyncio
+import logging
 import mimetypes
 import shutil
 from pathlib import Path
@@ -19,6 +20,7 @@ from rompmusic_server.models import PlayHistory, Track
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/stream", tags=["streaming"])
+logger = logging.getLogger(__name__)
 
 EXT_MIME = {
     "mp3": "audio/mpeg",
@@ -71,6 +73,22 @@ async def stream_track(
     Clients send Range: bytes=0- for partial content.
     Auth optional: records play history for user or anonymous (when public server).
     """
+    try:
+        return await _stream_track_impl(track_id, request, format, user_or_anon, db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Stream failed for track_id=%s: %s", track_id, e)
+        raise HTTPException(status_code=500, detail="Stream failed") from e
+
+
+async def _stream_track_impl(
+    track_id: int,
+    request: Request,
+    format: str | None,
+    user_or_anon: tuple[int | None, str | None],
+    db: AsyncSession,
+) -> Response:
     result = await db.execute(select(Track).where(Track.id == track_id))
     track = result.scalar_one_or_none()
     if not track:
@@ -85,9 +103,19 @@ async def stream_track(
         pass
 
     base = Path(settings.music_path).resolve()
+    if not track.file_path:
+        raise HTTPException(status_code=404, detail="Track has no file path")
     full_path = (base / track.file_path).resolve()
     if not full_path.is_relative_to(base) or not full_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        file_size = full_path.stat().st_size
+    except OSError as e:
+        logger.warning("Stream stat failed for track_id=%s path=%s: %s", track_id, full_path, e)
+        raise HTTPException(status_code=404, detail="File not accessible") from e
+
+    mime = get_mime(full_path)
 
     # Transcode to OGG when requested (no range support)
     if (format or "").lower() == "ogg":
@@ -97,16 +125,17 @@ async def stream_track(
             headers={"Content-Disposition": f'inline; filename="{full_path.stem}.ogg"'},
         )
 
-    file_size = full_path.stat().st_size
-    mime = get_mime(full_path)
-
     range_header = request.headers.get("range")
     if not range_header:
-        return FileResponse(
-            full_path,
-            media_type=mime,
-            filename=full_path.name,
-        )
+        try:
+            return FileResponse(
+                str(full_path),
+                media_type=mime,
+                filename=full_path.name,
+            )
+        except OSError as e:
+            logger.warning("Stream FileResponse failed for track_id=%s path=%s: %s", track_id, full_path, e)
+            raise HTTPException(status_code=502, detail="File not readable") from e
 
     # Parse Range: bytes=start-end
     try:
@@ -128,17 +157,21 @@ async def stream_track(
     content_length = end - start + 1
 
     def iter_file():
-        with open(full_path, "rb") as f:
-            f.seek(start)
-            remaining = content_length
-            chunk_size = 256 * 1024
-            while remaining > 0:
-                to_read = min(chunk_size, remaining)
-                data = f.read(to_read)
-                if not data:
-                    break
-                remaining -= len(data)
-                yield data
+        try:
+            with open(full_path, "rb") as f:
+                f.seek(start)
+                remaining = content_length
+                chunk_size = 256 * 1024
+                while remaining > 0:
+                    to_read = min(chunk_size, remaining)
+                    data = f.read(to_read)
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    yield data
+        except OSError as e:
+            logger.warning("Stream read failed for track_id=%s path=%s: %s", track_id, full_path, e)
+            raise
 
     return Response(
         content=iter_file(),
