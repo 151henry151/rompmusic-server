@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (Changes since last release will be listed here)
 
+## [0.1.0-beta.6] - 2026-02-16
+
+### Added
+
+- **Admin** — Full re-scan: dashboard "Full re-scan" button and `POST /server/scan/stream?full_rescan=1`. Clears all library data (play history, playlist tracks, tracks, albums, artists) then rescans. Runs in the same background task as normal scan, so it continues even if the browser is closed.
+
+### Changed
+
+- **Scanner** — `clear_library(session)` for full re-scan; imports for `delete`, `PlayHistory`, `PlaylistTrack`.
+- **Streaming** — Range requests use `StreamingResponse` instead of `Response` for compatibility with iOS/Safari.
+
 ## [0.1.0-beta.5] - 2026-02-19
 
 ### Changed

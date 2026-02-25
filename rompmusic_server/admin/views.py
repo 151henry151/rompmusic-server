@@ -136,8 +136,10 @@ def get_scan_progress(app: FastAPI) -> dict:
     return dict(_get_scan_state(app))
 
 
-def start_background_scan(app: FastAPI) -> bool:
-    """Start library scan in background if not already running. Returns True if started."""
+def start_background_scan(app: FastAPI, full_rescan: bool = False) -> bool:
+    """Start library scan in background if not already running. Returns True if started.
+    Scan runs in a background task (app.state.scan_task) so it continues even if the
+    browser is closed. If full_rescan is True, clears all library data then scans."""
     state = _get_scan_state(app)
     if app.state.scan_task is not None and not app.state.scan_task.done():
         return False
@@ -160,6 +162,11 @@ def start_background_scan(app: FastAPI) -> bool:
                         done=False,
                         error=None,
                     )
+
+                if full_rescan:
+                    state["current_file"] = "Clearing library..."
+                    await clear_library(session)
+                    await session.commit()
 
                 await scan_library(session, on_progress=on_progress)
                 await session.commit()
@@ -198,14 +205,12 @@ def start_background_scan(app: FastAPI) -> bool:
 @router.post("/scan/stream")
 async def admin_trigger_scan_stream(
     request: Request,
-    full_rescan: bool = Query(False),
     _user: User = Depends(require_admin_user),
 ):
     """Stream scan progress via Server-Sent Events. Scan runs in background with its own
-    DB session so it continues even if the browser tab is closed.
-    If full_rescan is true (query param ?full_rescan=1), clears all library data then scans."""
+    DB session so it continues even if the browser tab is closed."""
 
-    start_background_scan(request.app, full_rescan=full_rescan)
+    start_background_scan(request.app)
     state = _get_scan_state(request.app)
 
     async def event_generator():
