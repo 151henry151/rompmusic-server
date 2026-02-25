@@ -240,6 +240,7 @@
             result.innerHTML = '<p style="color: #f87171;">Scan error: ' + err.message + '</p>';
         } finally {
             btn.disabled = false;
+            if (fullBtn) fullBtn.disabled = false;
         }
     }
 

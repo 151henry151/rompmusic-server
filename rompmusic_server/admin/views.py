@@ -198,12 +198,14 @@ def start_background_scan(app: FastAPI) -> bool:
 @router.post("/scan/stream")
 async def admin_trigger_scan_stream(
     request: Request,
+    full_rescan: bool = Query(False),
     _user: User = Depends(require_admin_user),
 ):
     """Stream scan progress via Server-Sent Events. Scan runs in background with its own
-    DB session so it continues even if the browser tab is closed."""
+    DB session so it continues even if the browser tab is closed.
+    If full_rescan is true (query param ?full_rescan=1), clears all library data then scans."""
 
-    start_background_scan(request.app)
+    start_background_scan(request.app, full_rescan=full_rescan)
     state = _get_scan_state(request.app)
 
     async def event_generator():

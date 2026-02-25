@@ -173,8 +173,8 @@ async def _stream_track_impl(
             logger.warning("Stream read failed for track_id=%s path=%s: %s", track_id, full_path, e)
             raise
 
-    return Response(
-        content=iter_file(),
+    return StreamingResponse(
+        iter_file(),
         status_code=206,
         media_type=mime,
         headers={

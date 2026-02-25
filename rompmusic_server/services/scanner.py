@@ -12,11 +12,11 @@ from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
 from mutagen.oggvorbis import OggVorbis
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rompmusic_server.config import settings
-from rompmusic_server.models import Artist, Album, Track
+from rompmusic_server.models import Artist, Album, Track, PlayHistory, PlaylistTrack
 from rompmusic_server.services.artwork import artwork_hash_from_bytes, extract_artwork_from_file, has_artwork_in_file
 
 SUPPORTED_EXTENSIONS = {".mp3", ".flac", ".m4a", ".ogg", ".oga", ".opus"}
