@@ -27,8 +27,10 @@
         <p style="color: #64748b; font-size: 0.9rem;">Beets fetch-art runs after each scan.</p>
         {% endif %}
         <p style="margin-top: 1rem;">
-            <button id="scan-btn" onclick="startScan()">Scan Library</button>
+            <button id="scan-btn" onclick="startScan(false)">Scan Library</button>
+            <button id="full-rescan-btn" onclick="startScan(true)">Full re-scan</button>
         </p>
+        <p style="color: #64748b; font-size: 0.85rem; margin-top: 0.5rem;">Full re-scan clears all artists, albums, and tracks and then rescans.</p>
         <div id="scan-result"></div>
     </div>
 
@@ -164,17 +166,21 @@
     </div>
 
     <script>
-    async function startScan() {
+    async function startScan(fullRescan) {
         const btn = document.getElementById('scan-btn');
+        const fullBtn = document.getElementById('full-rescan-btn');
         const result = document.getElementById('scan-result');
         btn.disabled = true;
+        if (fullBtn) fullBtn.disabled = true;
         result.innerHTML = '<p style="color: #94a3b8;">Connecting to scan stream...</p>';
 
         try {
-            const resp = await fetch('/server/scan/stream', { method: 'POST', credentials: 'same-origin' });
+            const url = '/server/scan/stream' + (fullRescan ? '?full_rescan=1' : '');
+            const resp = await fetch(url, { method: 'POST', credentials: 'same-origin' });
             if (!resp.ok) {
                 result.innerHTML = '<p style="color: #f87171;">Scan failed: ' + resp.status + '</p>';
                 btn.disabled = false;
+                if (fullBtn) fullBtn.disabled = false;
                 return;
             }
 
@@ -219,6 +225,7 @@
                                 result.innerHTML = '<p style="color: #4ade80;">Scan complete! Reloading...</p>';
                                 window.location.reload();
                             }
+                            if (fullBtn) fullBtn.disabled = false;
                             btn.disabled = false;
                             return;
                         }
