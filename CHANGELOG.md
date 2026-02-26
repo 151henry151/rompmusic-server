@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (Changes since last release will be listed here)
 
+## [0.1.0-beta.7] - 2026-02-26
+
+### Changed
+
+- **Scanner** — Album key is now `(album_title, year)` instead of `(artist_name, album_title)`. One album row per release so tracks with different per-track artists (e.g. "Miles Davis" vs "Miles Davis Feat. Easy Mo Bee" on "Doo-Bop") stay in the same album. Lookup by title + year; new albums use the first track's artist as the album's primary artist.
+
 ## [0.1.0-beta.6] - 2026-02-16
 
 ### Added

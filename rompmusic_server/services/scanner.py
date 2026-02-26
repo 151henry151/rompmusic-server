@@ -179,20 +179,22 @@ async def scan_library(
             artists_map[artist_name] = artist.id
 
         artist_id = artists_map[artist_name]
-        key = (artist_name, album_title)
+        # Key by (album_title, year) so one album holds all tracks for that release regardless of
+        # per-track artist (e.g. "Doo-Bop" with "Miles Davis" and "Miles Davis Feat. Easy Mo Bee").
+        year_val = meta.get("year")
+        key = (album_title, year_val)
         if key not in albums_map:
-            result = await session.execute(
-                select(Album).where(
-                    Album.artist_id == artist_id,
-                    Album.title == album_title,
-                )
-            )
+            if year_val is None:
+                album_cond = (Album.title == album_title) & (Album.year.is_(None))
+            else:
+                album_cond = (Album.title == album_title) & (Album.year == year_val)
+            result = await session.execute(select(Album).where(album_cond))
             album = result.scalar_one_or_none()
             if not album:
                 album = Album(
                     title=album_title,
                     artist_id=artist_id,
-                    year=meta.get("year"),
+                    year=year_val,
                 )
                 session.add(album)
                 await session.flush()
