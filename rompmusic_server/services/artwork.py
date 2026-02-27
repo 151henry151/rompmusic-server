@@ -4,7 +4,6 @@
 """Extract embedded artwork from music files using Mutagen."""
 
 import base64
-import hashlib
 import json
 from pathlib import Path
 
@@ -78,8 +77,3 @@ def extract_artwork_from_file(file_path: Path) -> tuple[bytes, str] | None:
         return None
     except Exception:
         return None
-
-
-def artwork_hash_from_bytes(data: bytes) -> str:
-    """Return SHA-256 hex digest of image bytes for grouping identical artwork."""
-    return hashlib.sha256(data).hexdigest()

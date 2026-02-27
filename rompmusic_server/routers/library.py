@@ -3,11 +3,11 @@
 
 """Library API routes - artists, albums, tracks."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from rompmusic_server.auth import get_current_user_id, get_optional_user_id, get_user_id_or_anonymous
+from rompmusic_server.auth import get_current_user_id, get_optional_user_id
 from rompmusic_server.database import get_db
 from rompmusic_server.models import Album, Artist, PlayHistory, Track
 from rompmusic_server.api.schemas import AlbumResponse, ArtistResponse, TrackResponse
@@ -23,28 +23,6 @@ def _artist_order(q, sort_by: str, order: str):
     return q.order_by(desc(col) if order == "desc" else asc(col))
 
 
-def _artist_primary_album_id():
-    from sqlalchemy import asc
-    return (
-        select(Album.id)
-        .where(Album.artist_id == Artist.id)
-        .order_by(Album.year.desc().nullslast(), asc(Album.id))
-        .limit(1)
-        .scalar_subquery()
-    )
-
-
-def _artist_primary_album_title():
-    from sqlalchemy import asc
-    return (
-        select(Album.title)
-        .where(Album.artist_id == Artist.id)
-        .order_by(Album.year.desc().nullslast(), asc(Album.id))
-        .limit(1)
-        .scalar_subquery()
-    )
-
-
 @router.get("/artists", response_model=list[ArtistResponse])
 async def list_artists(
     skip: int = Query(0, ge=0),
@@ -56,15 +34,7 @@ async def list_artists(
     db: AsyncSession = Depends(get_db),
 ) -> list[ArtistResponse]:
     """List artists with optional search and sort."""
-    from sqlalchemy import exists, or_
-
-    has_artwork_subq = exists().where(Album.artist_id == Artist.id).where(Album.has_artwork == True)
-    q = select(
-        Artist,
-        has_artwork_subq.label("has_artwork"),
-        _artist_primary_album_id().label("primary_album_id"),
-        _artist_primary_album_title().label("primary_album_title"),
-    )
+    q = select(Artist)
     if search:
         q = q.where(Artist.name.ilike(f"%{search}%"))
     if home:
@@ -72,19 +42,8 @@ async def list_artists(
         q = q.distinct()
     q = _artist_order(q, sort_by, order).offset(skip).limit(limit)
     result = await db.execute(q)
-    rows = result.all()
-    return [
-        ArtistResponse(
-            id=a.id,
-            name=a.name,
-            artwork_path=a.artwork_path,
-            has_artwork=bool(has_art) if has_art is not None else None,
-            primary_album_id=pid,
-            primary_album_title=ptitle,
-            created_at=a.created_at,
-        )
-        for a, has_art, pid, ptitle in rows
-    ]
+    artists = result.scalars().all()
+    return [ArtistResponse.model_validate(a) for a in artists]
 
 
 @router.get("/artists/{artist_id}", response_model=ArtistResponse)
@@ -93,54 +52,26 @@ async def get_artist(
     db: AsyncSession = Depends(get_db),
 ) -> ArtistResponse:
     """Get artist by ID."""
-    from sqlalchemy import exists, or_
-
-    has_artwork_subq = exists().where(Album.artist_id == Artist.id).where(Album.has_artwork == True)
-    result = await db.execute(
-        select(
-            Artist,
-            has_artwork_subq.label("has_artwork"),
-            _artist_primary_album_id().label("primary_album_id"),
-            _artist_primary_album_title().label("primary_album_title"),
-        ).where(Artist.id == artist_id)
-    )
-    row = result.one_or_none()
-    if not row:
+    result = await db.execute(select(Artist).where(Artist.id == artist_id))
+    artist = result.scalar_one_or_none()
+    if not artist:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Artist not found")
-    artist, has_art, pid, ptitle = row
-    return ArtistResponse(
-        id=artist.id,
-        name=artist.name,
-        artwork_path=artist.artwork_path,
-        has_artwork=bool(has_art) if has_art is not None else None,
-        primary_album_id=pid,
-        primary_album_title=ptitle,
-        created_at=artist.created_at,
-    )
+    return ArtistResponse.model_validate(artist)
 
 
 def _album_order(q, sort_by: str, order: str):
-    """Apply sort to album query. q must have Album and Artist joined.
-    For alphabetical sorts (title, artist), items starting with 0-9 or special
-    characters are placed at the end; A-Z always come first.
-    """
-    from sqlalchemy import asc, case, func
+    """Apply sort to album query. q must have Album and Artist joined."""
+    from sqlalchemy import asc
     if sort_by == "year":
         col = Album.year
-        return q.order_by(desc(col).nullslast() if order == "desc" else asc(col).nullslast())
-    if sort_by == "date_added":
+    elif sort_by == "date_added":
         col = Album.created_at
-        return q.order_by(desc(col).nullslast() if order == "desc" else asc(col).nullslast())
-    # Alphabetical sort: letters first, then numbers/symbols at the end
-    if sort_by == "artist":
+    elif sort_by == "artist":
         col = Artist.name
     else:  # title
         col = Album.title
-    first_char = func.lower(func.substr(col, 1, 1))
-    letter_first = case((first_char.between("a", "z"), 0), else_=1)
-    dir_col = desc(col).nullslast() if order == "desc" else asc(col).nullslast()
-    return q.order_by(letter_first, dir_col)
+    return q.order_by(desc(col).nullslast() if order == "desc" else asc(col).nullslast())
 
 
 @router.get("/albums", response_model=list[AlbumResponse])
@@ -151,59 +82,35 @@ async def list_albums(
     search: str | None = Query(None),
     sort_by: str = Query("year", description="Sort: year, date_added, artist, title"),
     order: str = Query("desc", description="Order: asc, desc"),
-    random: bool = Query(False, description="Return random albums"),
-    artwork_first: bool = Query(True, description="Put albums with artwork first (no-art at bottom)"),
     db: AsyncSession = Depends(get_db),
 ) -> list[AlbumResponse]:
-    """List albums with optional filters and sort.
-    When search is set, matches album title, artist name, or any track title on the album.
-    When artwork_first is true, albums with artwork are listed before those without.
-    """
-    from sqlalchemy import asc, exists, func, or_
+    """List albums with optional filters and sort."""
     q = select(Album, Artist.name).join(Artist, Album.artist_id == Artist.id)
     if artist_id:
         q = q.where(Album.artist_id == artist_id)
     if search:
-        pattern = f"%{search}%"
-        album_has_matching_track = exists().where(Track.album_id == Album.id).where(Track.title.ilike(pattern))
-        q = q.where(
-            or_(
-                Album.title.ilike(pattern),
-                Artist.name.ilike(pattern),
-                album_has_matching_track,
-            )
-        )
-    if random:
-        q = q.order_by(func.random()).offset(skip).limit(limit)
-    else:
-        if artwork_first:
-            q = q.order_by(desc(Album.has_artwork).nullslast())
-        q = _album_order(q, sort_by, order).offset(skip).limit(limit)
+        q = q.where(Album.title.ilike(f"%{search}%"))
+    q = _album_order(q, sort_by, order).offset(skip).limit(limit)
     result = await db.execute(q)
     rows = result.all()
-    if not rows:
-        return []
-    album_ids = [a.id for a, _ in rows]
-    # Single query for all track counts (avoids N+1)
-    count_result = await db.execute(
-        select(Track.album_id, func.count(Track.id).label("tc")).where(Track.album_id.in_(album_ids)).group_by(Track.album_id)
-    )
-    count_by_album = {row[0]: row[1] for row in count_result.all()}
-    return [
-        AlbumResponse(
-            id=a.id,
-            title=a.title,
-            artist_id=a.artist_id,
-            artist_name=an,
-            year=a.year,
-            artwork_path=a.artwork_path,
-            has_artwork=a.has_artwork,
-            artwork_hash=a.artwork_hash,
-            track_count=count_by_album.get(a.id, 0),
-            created_at=a.created_at,
+    from sqlalchemy import func
+    out = []
+    for a, an in rows:
+        tc = await db.scalar(select(func.count()).select_from(Track).where(Track.album_id == a.id))
+        out.append(
+            AlbumResponse(
+                id=a.id,
+                title=a.title,
+                artist_id=a.artist_id,
+                artist_name=an,
+                year=a.year,
+                artwork_path=a.artwork_path,
+                has_artwork=a.has_artwork,
+                track_count=tc or 0,
+                created_at=a.created_at,
+            )
         )
-        for a, an in rows
-    ]
+    return out
 
 
 @router.get("/albums/{album_id}", response_model=AlbumResponse)
@@ -231,21 +138,14 @@ async def get_album(
         year=album.year,
         artwork_path=album.artwork_path,
         has_artwork=album.has_artwork,
-        artwork_hash=album.artwork_hash,
         track_count=track_count,
         created_at=album.created_at,
     )
 
 
-def _track_order(q, sort_by: str, order: str, album_id: int | None = None):
-    """Apply sort to track query. q must have Track, Album, Artist.
-    When album_id is set, use disc_number then track_number so multi-disc albums play in order."""
+def _track_order(q, sort_by: str, order: str):
+    """Apply sort to track query. q must have Track, Album, Artist."""
     from sqlalchemy import asc
-    if album_id is not None:
-        return q.order_by(
-            asc(Track.disc_number).nullslast(),
-            asc(Track.track_number).nullslast(),
-        )
     if sort_by == "year":
         col = Album.year
     elif sort_by == "date_added":
@@ -282,7 +182,7 @@ async def list_tracks(
         q = q.where(Track.artist_id == artist_id)
     if search:
         q = q.where(Track.title.ilike(f"%{search}%"))
-    q = _track_order(q, sort_by, order, album_id=album_id).offset(skip).limit(limit)
+    q = _track_order(q, sort_by, order).offset(skip).limit(limit)
     result = await db.execute(q)
     rows = result.all()
     return [
@@ -358,29 +258,16 @@ async def list_recently_added_tracks(
     return _filter_home_quality(rows, limit)
 
 
-def _play_history_filter_user_or_anon(user_id: int | None, anonymous_id: str | None):
-    """Filter PlayHistory by user_id or anonymous_id (one must be set)."""
-    if user_id is not None:
-        return PlayHistory.user_id == user_id
-    if anonymous_id is not None:
-        return PlayHistory.anonymous_id == anonymous_id
-    return None
-
-
 @router.get("/tracks/recently-played", response_model=list[TrackResponse])
 async def list_recently_played_tracks(
     limit: int = Query(20, ge=1, le=50),
-    user_or_anon: tuple[int | None, str | None] = Depends(get_user_id_or_anonymous),
+    user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> list[TrackResponse]:
-    """List user's or anonymous session's recently played tracks. Public server: cookie-based anonymous."""
-    user_id, anonymous_id = user_or_anon
-    filt = _play_history_filter_user_or_anon(user_id, anonymous_id)
-    if filt is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    """List user's recently played tracks. Home page: only quality metadata."""
     subq = (
         select(PlayHistory.track_id, func.max(PlayHistory.played_at).label("last_played"))
-        .where(filt)
+        .where(PlayHistory.user_id == user_id)
         .group_by(PlayHistory.track_id)
     ).subquery()
     q = (
@@ -399,17 +286,13 @@ async def list_recently_played_tracks(
 @router.get("/tracks/frequently-played", response_model=list[TrackResponse])
 async def list_frequently_played_tracks(
     limit: int = Query(20, ge=1, le=50),
-    user_or_anon: tuple[int | None, str | None] = Depends(get_user_id_or_anonymous),
+    user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> list[TrackResponse]:
-    """List user's or anonymous session's frequently played tracks. Public server: cookie-based anonymous."""
-    user_id, anonymous_id = user_or_anon
-    filt = _play_history_filter_user_or_anon(user_id, anonymous_id)
-    if filt is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    """List user's most frequently played tracks. Home page: only quality metadata."""
     subq = (
         select(PlayHistory.track_id, func.count(PlayHistory.id).label("play_count"))
-        .where(filt)
+        .where(PlayHistory.user_id == user_id)
         .group_by(PlayHistory.track_id)
     ).subquery()
     q = (

@@ -25,19 +25,11 @@ class Settings(BaseSettings):
 
     # Music library
     music_path: Path = Path("/music")
-    # Automated library scan interval in hours (0 = disabled). Default 24 = daily.
-    auto_scan_interval_hours: float = 24
-    # Run beets (e.g. fetch-art) in the music directory every N hours (0 = disabled). Default 24 = daily.
-    beets_auto_interval_hours: float = 24
-    # Run beets fetch-art once after each library scan completes (when True).
-    run_beets_after_scan: bool = False
 
     # Server
     host: str = "0.0.0.0"
     port: int = 8080
     base_url: str = "http://localhost:8080"
-    # CORS: comma-separated origins, or "*" for allow all (e.g. "https://rompmusic.com,https://app.rompmusic.com")
-    cors_origins: str = "*"
 
     # FFmpeg
     ffmpeg_path: str = "ffmpeg"
@@ -51,7 +43,6 @@ class Settings(BaseSettings):
     smtp_user: str | None = None
     smtp_password: str | None = None
     smtp_from: str = "noreply@rompmusic.local"
-    # Base URL for the app (invite links, password reset links). Set APP_BASE_URL in production (e.g. https://rompmusic.com).
     app_base_url: str = "http://localhost:8080"
 
     # Recommendations: Last.fm API (optional; free key at last.fm/api/account/create)

@@ -12,12 +12,12 @@ from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
 from mutagen.oggvorbis import OggVorbis
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rompmusic_server.config import settings
-from rompmusic_server.models import Artist, Album, Track, PlayHistory, PlaylistTrack
-from rompmusic_server.services.artwork import artwork_hash_from_bytes, extract_artwork_from_file, has_artwork_in_file
+from rompmusic_server.models import Artist, Album, Track
+from rompmusic_server.services.artwork import has_artwork_in_file
 
 SUPPORTED_EXTENSIONS = {".mp3", ".flac", ".m4a", ".ogg", ".oga", ".opus"}
 
@@ -94,7 +94,7 @@ def _get_tag(tags: Any, keys: list[str]) -> str | None:
                     val = val.decode("utf-8", errors="replace")
                 if val:
                     return str(val).strip()
-        except (KeyError, IndexError, TypeError, ValueError):
+        except (KeyError, IndexError, TypeError):
             continue
     return None
 
@@ -179,22 +179,20 @@ async def scan_library(
             artists_map[artist_name] = artist.id
 
         artist_id = artists_map[artist_name]
-        # Key by (album_title, year) so one album holds all tracks for that release regardless of
-        # per-track artist (e.g. "Doo-Bop" with "Miles Davis" and "Miles Davis Feat. Easy Mo Bee").
-        year_val = meta.get("year")
-        key = (album_title, year_val)
+        key = (artist_name, album_title)
         if key not in albums_map:
-            if year_val is None:
-                album_cond = (Album.title == album_title) & (Album.year.is_(None))
-            else:
-                album_cond = (Album.title == album_title) & (Album.year == year_val)
-            result = await session.execute(select(Album).where(album_cond))
+            result = await session.execute(
+                select(Album).where(
+                    Album.artist_id == artist_id,
+                    Album.title == album_title,
+                )
+            )
             album = result.scalar_one_or_none()
             if not album:
                 album = Album(
                     title=album_title,
                     artist_id=artist_id,
-                    year=year_val,
+                    year=meta.get("year"),
                 )
                 session.add(album)
                 await session.flush()
@@ -220,16 +218,13 @@ async def scan_library(
             session.add(track)
             new_tracks += 1
 
-        # Update album has_artwork and artwork_hash when we find embedded art
+        # Update album has_artwork when we find embedded art (for home quality filtering)
         album_result = await session.execute(select(Album).where(Album.id == album_id))
         album = album_result.scalar_one()
         if album.has_artwork is not True:
             has_art = await loop.run_in_executor(None, has_artwork_in_file, file_path)
-            album.has_artwork = has_art
-        if album.has_artwork is True and album.artwork_hash is None:
-            artwork = await loop.run_in_executor(None, extract_artwork_from_file, file_path)
-            if artwork:
-                album.artwork_hash = artwork_hash_from_bytes(artwork[0])
+            if has_art:
+                album.has_artwork = True
 
         seen_tracks.add(rel_path)
 

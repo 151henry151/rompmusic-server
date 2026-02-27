@@ -3,24 +3,20 @@
 
 """Streaming API - serves audio with HTTP range request support."""
 
-import asyncio
-import logging
 import mimetypes
-import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import select
 
-from rompmusic_server.auth import get_user_id_or_anonymous
+from rompmusic_server.auth import get_current_user_id
 from rompmusic_server.config import settings
 from rompmusic_server.database import get_db
-from rompmusic_server.models import PlayHistory, Track
+from rompmusic_server.models import Track
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/stream", tags=["streaming"])
-logger = logging.getLogger(__name__)
 
 EXT_MIME = {
     "mp3": "audio/mpeg",
@@ -38,104 +34,36 @@ def get_mime(path: Path) -> str:
     return EXT_MIME.get(ext) or mimetypes.guess_type(str(path))[0] or "application/octet-stream"
 
 
-async def _transcode_to_ogg(full_path: Path):
-    """Stream transcoded OGG Vorbis. Yields bytes. No range support."""
-    ffmpeg = shutil.which(settings.ffmpeg_path) or settings.ffmpeg_path
-    proc = await asyncio.create_subprocess_exec(
-        ffmpeg,
-        "-i", str(full_path),
-        "-f", "ogg",
-        "-acodec", "libvorbis",
-        "-q:a", "5",  # VBR quality ~160kbps
-        "-",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
-    chunk_size = 64 * 1024
-    while True:
-        chunk = await proc.stdout.read(chunk_size)
-        if not chunk:
-            break
-        yield chunk
-    await proc.wait()
-
-
 @router.get("/{track_id}")
 async def stream_track(
     track_id: int,
     request: Request,
-    format: str | None = "original",
-    user_or_anon: tuple[int | None, str | None] = Depends(get_user_id_or_anonymous),
+    user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """
     Stream a track with HTTP Range request support for seeking.
     Clients send Range: bytes=0- for partial content.
-    Auth optional: records play history for user or anonymous (when public server).
     """
-    try:
-        return await _stream_track_impl(track_id, request, format, user_or_anon, db)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Stream failed for track_id=%s: %s", track_id, e)
-        raise HTTPException(status_code=500, detail="Stream failed") from e
-
-
-async def _stream_track_impl(
-    track_id: int,
-    request: Request,
-    format: str | None,
-    user_or_anon: tuple[int | None, str | None],
-    db: AsyncSession,
-) -> Response:
     result = await db.execute(select(Track).where(Track.id == track_id))
     track = result.scalar_one_or_none()
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
 
-    user_id, anonymous_id = user_or_anon
-    if user_id is not None or anonymous_id is not None:
-        db.add(PlayHistory(user_id=user_id, anonymous_id=anonymous_id, track_id=track_id))
-    try:
-        await db.flush()
-    except Exception:
-        pass
-
-    base = Path(settings.music_path).resolve()
-    if not track.file_path:
-        raise HTTPException(status_code=404, detail="Track has no file path")
-    full_path = (base / track.file_path).resolve()
-    if not full_path.is_relative_to(base) or not full_path.exists():
+    full_path = Path(settings.music_path) / track.file_path
+    if not full_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
-    try:
-        file_size = full_path.stat().st_size
-    except OSError as e:
-        logger.warning("Stream stat failed for track_id=%s path=%s: %s", track_id, full_path, e)
-        raise HTTPException(status_code=404, detail="File not accessible") from e
-
+    file_size = full_path.stat().st_size
     mime = get_mime(full_path)
-
-    # Transcode to OGG when requested (no range support)
-    if (format or "").lower() == "ogg":
-        return StreamingResponse(
-            _transcode_to_ogg(full_path),
-            media_type="audio/ogg",
-            headers={"Content-Disposition": f'inline; filename="{full_path.stem}.ogg"'},
-        )
 
     range_header = request.headers.get("range")
     if not range_header:
-        try:
-            return FileResponse(
-                str(full_path),
-                media_type=mime,
-                filename=full_path.name,
-            )
-        except OSError as e:
-            logger.warning("Stream FileResponse failed for track_id=%s path=%s: %s", track_id, full_path, e)
-            raise HTTPException(status_code=502, detail="File not readable") from e
+        return FileResponse(
+            full_path,
+            media_type=mime,
+            filename=full_path.name,
+        )
 
     # Parse Range: bytes=start-end
     try:
@@ -157,24 +85,20 @@ async def _stream_track_impl(
     content_length = end - start + 1
 
     def iter_file():
-        try:
-            with open(full_path, "rb") as f:
-                f.seek(start)
-                remaining = content_length
-                chunk_size = 256 * 1024
-                while remaining > 0:
-                    to_read = min(chunk_size, remaining)
-                    data = f.read(to_read)
-                    if not data:
-                        break
-                    remaining -= len(data)
-                    yield data
-        except OSError as e:
-            logger.warning("Stream read failed for track_id=%s path=%s: %s", track_id, full_path, e)
-            raise
+        with open(full_path, "rb") as f:
+            f.seek(start)
+            remaining = content_length
+            chunk_size = 256 * 1024
+            while remaining > 0:
+                to_read = min(chunk_size, remaining)
+                data = f.read(to_read)
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
 
-    return StreamingResponse(
-        iter_file(),
+    return Response(
+        content=iter_file(),
         status_code=206,
         media_type=mime,
         headers={

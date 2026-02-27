@@ -6,14 +6,13 @@
 import secrets
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import delete, select, update
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rompmusic_server.auth import create_access_token, get_current_user_id, hash_password, verify_password
 from rompmusic_server.database import get_db
-from rompmusic_server.rate_limit import rate_limit_auth_dep
-from rompmusic_server.models import Invitation, PasswordResetToken, PlayHistory, User, VerificationCode
+from rompmusic_server.models import PasswordResetToken, User, VerificationCode
 from rompmusic_server.api.schemas import (
     Token,
     UserCreate,
@@ -24,12 +23,11 @@ from rompmusic_server.api.schemas import (
     VerifyEmailRequest,
 )
 from rompmusic_server.services.email import send_email
-from rompmusic_server.services.server_settings import get_server_settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/login", response_model=Token, dependencies=[Depends(rate_limit_auth_dep)])
+@router.post("/login", response_model=Token)
 async def login(
     data: UserLogin,
     db: AsyncSession = Depends(get_db),
@@ -48,18 +46,12 @@ async def login(
     return Token(access_token=token)
 
 
-@router.post("/register", response_model=UserResponse, dependencies=[Depends(rate_limit_auth_dep)])
+@router.post("/register", response_model=UserResponse)
 async def register(
     data: UserCreate,
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     """Create a new user account. User must verify email before logging in."""
-    server_settings = await get_server_settings(db)
-    if not server_settings.get("registration_enabled", True):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Registration is disabled",
-        )
     result = await db.execute(select(User).where(User.username == data.username))
     if result.scalar_one_or_none():
         raise HTTPException(
@@ -97,7 +89,7 @@ async def register(
     return UserResponse.model_validate(user)
 
 
-@router.post("/verify-email", dependencies=[Depends(rate_limit_auth_dep)])
+@router.post("/verify-email")
 async def verify_email(
     data: VerifyEmailRequest,
     db: AsyncSession = Depends(get_db),
@@ -117,20 +109,13 @@ async def verify_email(
     vc = result.scalar_one_or_none()
     if not vc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired code")
-    server_settings = await get_server_settings(db)
-    if server_settings.get("registration_requires_approval", False):
-        # Leave is_active=False until an admin approves the user
-        pass
-    else:
-        user.is_active = True
+    user.is_active = True
     await db.execute(delete(VerificationCode).where(VerificationCode.user_id == user.id))
     await db.commit()
-    if user.is_active:
-        return {"message": "Email verified. You can now sign in."}
-    return {"message": "Email verified. Your account is pending admin approval."}
+    return {"message": "Email verified. You can now sign in."}
 
 
-@router.post("/forgot-password", dependencies=[Depends(rate_limit_auth_dep)])
+@router.post("/forgot-password")
 async def forgot_password(
     data: ForgotPasswordRequest,
     db: AsyncSession = Depends(get_db),
@@ -156,7 +141,7 @@ async def forgot_password(
     return {"message": "If an account exists, you will receive a password reset link."}
 
 
-@router.post("/reset-password", dependencies=[Depends(rate_limit_auth_dep)])
+@router.post("/reset-password")
 async def reset_password(
     data: ResetPasswordRequest,
     db: AsyncSession = Depends(get_db),
@@ -193,22 +178,3 @@ async def get_me(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return UserResponse.model_validate(user)
-
-
-@router.delete("/me", dependencies=[Depends(rate_limit_auth_dep)])
-async def delete_account(
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Permanently delete the current user's account and all associated data (playlists, play history)."""
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    await db.execute(delete(VerificationCode).where(VerificationCode.user_id == user_id))
-    await db.execute(delete(PasswordResetToken).where(PasswordResetToken.email == user.email))
-    await db.execute(delete(PlayHistory).where(PlayHistory.user_id == user_id))
-    await db.execute(update(Invitation).where(Invitation.invited_by_id == user_id).values(invited_by_id=None))
-    await db.delete(user)
-    await db.commit()
-    return {"message": "Account deleted successfully."}

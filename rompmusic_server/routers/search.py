@@ -4,7 +4,7 @@
 """Search API - search across artists, albums, tracks."""
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import exists, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rompmusic_server.auth import get_optional_user_id
@@ -27,39 +27,15 @@ async def search(
     """
     pattern = f"%{q}%"
 
-    from rompmusic_server.routers.library import (
-        _artist_primary_album_id,
-        _artist_primary_album_title,
-    )
-
-    has_artwork_subq = exists().where(Album.artist_id == Artist.id).where(Album.has_artwork == True)
     artists_result = await db.execute(
-        select(
-            Artist,
-            has_artwork_subq.label("has_artwork"),
-            _artist_primary_album_id().label("primary_album_id"),
-            _artist_primary_album_title().label("primary_album_title"),
-        )
-        .where(Artist.name.ilike(pattern))
-        .limit(limit)
+        select(Artist).where(Artist.name.ilike(pattern)).limit(limit)
     )
-    artists = [
-        ArtistResponse(
-            id=a.id,
-            name=a.name,
-            artwork_path=a.artwork_path,
-            has_artwork=bool(has_art) if has_art is not None else None,
-            primary_album_id=pid,
-            primary_album_title=ptitle,
-            created_at=a.created_at,
-        )
-        for a, has_art, pid, ptitle in artists_result.all()
-    ]
+    artists = [ArtistResponse.model_validate(a) for a in artists_result.scalars().all()]
 
     albums_result = await db.execute(
         select(Album, Artist.name)
         .join(Artist, Album.artist_id == Artist.id)
-        .where(or_(Album.title.ilike(pattern), Artist.name.ilike(pattern)))
+        .where(Album.title.ilike(pattern))
         .limit(limit)
     )
     albums = [
