@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- (Changes since last release will be listed here)
+- **Account deletion** — `DELETE /api/v1/auth/me` (authenticated): permanently deletes the current user and all related data (verification codes, password reset tokens, play history, playlists; invitations’ `invited_by_id` set to null). Returns 401 without token. Required for App Store account-deletion policy.
 
 ## [0.1.0-beta.7] - 2026-02-26
 

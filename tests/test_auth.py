@@ -61,3 +61,9 @@ async def test_me_requires_auth(client: AsyncClient):
     """GET /auth/me without token returns 401."""
     r = await client.get("/api/v1/auth/me")
     assert r.status_code == 401
+
+
+async def test_delete_me_requires_auth(client: AsyncClient):
+    """DELETE /auth/me without token returns 401."""
+    r = await client.delete("/api/v1/auth/me")
+    assert r.status_code == 401

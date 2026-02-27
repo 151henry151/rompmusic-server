@@ -7,13 +7,13 @@ import secrets
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rompmusic_server.auth import create_access_token, get_current_user_id, hash_password, verify_password
 from rompmusic_server.database import get_db
 from rompmusic_server.rate_limit import rate_limit_auth_dep
-from rompmusic_server.models import PasswordResetToken, User, VerificationCode
+from rompmusic_server.models import Invitation, PasswordResetToken, PlayHistory, User, VerificationCode
 from rompmusic_server.api.schemas import (
     Token,
     UserCreate,
@@ -193,3 +193,22 @@ async def get_me(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return UserResponse.model_validate(user)
+
+
+@router.delete("/me", dependencies=[Depends(rate_limit_auth_dep)])
+async def delete_account(
+    user_id: int = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Permanently delete the current user's account and all associated data (playlists, play history)."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    await db.execute(delete(VerificationCode).where(VerificationCode.user_id == user_id))
+    await db.execute(delete(PasswordResetToken).where(PasswordResetToken.email == user.email))
+    await db.execute(delete(PlayHistory).where(PlayHistory.user_id == user_id))
+    await db.execute(update(Invitation).where(Invitation.invited_by_id == user_id).values(invited_by_id=None))
+    await db.delete(user)
+    await db.commit()
+    return {"message": "Account deleted successfully."}
