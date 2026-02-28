@@ -9,7 +9,7 @@ GPL-3.0-or-later. See [LICENSE](../LICENSE).
 ## Features
 
 - Multi-user authentication (JWT)
-- Music library management
+- Music library management and play history
 - HTTP range request streaming
 - RESTful API at `/api/v1/`
 - Web admin panel
