@@ -104,7 +104,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="RompMusic Server",
     description="Libre self-hosted music streaming API",
-    version="0.1.0-beta.2",
+    version="0.1.0-beta.13",
     lifespan=lifespan,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -170,7 +170,7 @@ async def root():
     """Health check / API info."""
     return {
         "name": "RompMusic Server",
-        "version": "0.1.0-beta.2",
+        "version": "0.1.0-beta.13",
         "api": "/api/v1",
         "docs": "/api/docs",
     }

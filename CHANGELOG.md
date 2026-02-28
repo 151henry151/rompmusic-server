@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.13] - 2026-02-28
+
 ### Added
 
 - **Account deletion** — `DELETE /api/v1/auth/me` (authenticated): permanently deletes the current user and all related data (verification codes, password reset tokens, play history, playlists; invitations’ `invited_by_id` set to null). Returns 401 without token. Required for App Store account-deletion policy.
+
+### Fixed
+
+- **Play history endpoint** — `GET /api/v1/library/tracks/recently-played` now supports optional `limit` with no hard cap of 50 and returns full history when `limit` is omitted.
+- **History completeness** — Recently played history no longer uses home-page metadata filtering, so played tracks are returned consistently for app/web history views.
+- **Regression coverage** — Added endpoint tests for large-limit requests (`limit=100`) and no-limit full-history behavior.
 
 ## [0.1.0-beta.7] - 2026-02-26
 
@@ -92,7 +100,8 @@ First beta release. Part of RompMusic 0.1.0-beta.1.
 
 - Library scan progress stuck at 0% (per-file progress callbacks, SSE-friendly nginx config)
 
-[Unreleased]: https://github.com/151henry151/rompmusic-server/compare/v0.1.0-beta.5...HEAD
+[Unreleased]: https://github.com/151henry151/rompmusic-server/compare/v0.1.0-beta.13...HEAD
+[0.1.0-beta.13]: https://github.com/151henry151/rompmusic-server/compare/v0.1.0-beta.7...v0.1.0-beta.13
 [0.1.0-beta.5]: https://github.com/151henry151/rompmusic-server/compare/v0.1.0-beta.4...v0.1.0-beta.5
 [0.1.0-beta.4]: https://github.com/151henry151/rompmusic-server/compare/v0.1.0-beta.3...v0.1.0-beta.4
 [0.1.0-beta.3]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.0-beta.3

@@ -369,11 +369,11 @@ def _play_history_filter_user_or_anon(user_id: int | None, anonymous_id: str | N
 
 @router.get("/tracks/recently-played", response_model=list[TrackResponse])
 async def list_recently_played_tracks(
-    limit: int = Query(20, ge=1, le=50),
+    limit: int | None = Query(None, ge=1),
     user_or_anon: tuple[int | None, str | None] = Depends(get_user_id_or_anonymous),
     db: AsyncSession = Depends(get_db),
 ) -> list[TrackResponse]:
-    """List user's or anonymous session's recently played tracks. Public server: cookie-based anonymous."""
+    """List user's or anonymous session's recently played tracks (full history unless limit is provided)."""
     user_id, anonymous_id = user_or_anon
     filt = _play_history_filter_user_or_anon(user_id, anonymous_id)
     if filt is None:
@@ -384,16 +384,32 @@ async def list_recently_played_tracks(
         .group_by(PlayHistory.track_id)
     ).subquery()
     q = (
-        select(Track, Album.title, Artist.name, Album.has_artwork)
+        select(Track, Album.title, Artist.name)
         .join(Album, Track.album_id == Album.id)
         .join(Artist, Track.artist_id == Artist.id)
         .join(subq, Track.id == subq.c.track_id)
         .order_by(desc(subq.c.last_played))
-        .limit(limit * 5)
     )
+    if limit is not None:
+        q = q.limit(limit)
     result = await db.execute(q)
     rows = result.all()
-    return _filter_home_quality(rows, limit)
+    return [
+        TrackResponse(
+            id=t.id,
+            title=t.title,
+            album_id=t.album_id,
+            artist_id=t.artist_id,
+            album_title=at,
+            artist_name=an,
+            track_number=t.track_number,
+            disc_number=t.disc_number,
+            duration=t.duration,
+            bitrate=t.bitrate,
+            format=t.format,
+        )
+        for t, at, an in rows
+    ]
 
 
 @router.get("/tracks/frequently-played", response_model=list[TrackResponse])
