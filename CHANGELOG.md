@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (Changes since last release will be listed here)
 
+## [0.1.0-beta.17] - 2026-03-01
+
+### Changed
+
+- Version sync with umbrella and other submodules (no server-specific changes this release)
+
 ## [0.1.0-beta.16] - 2026-02-16
 
 ### Changed
@@ -48,7 +54,8 @@ First beta release. Part of RompMusic 0.1.0-beta.1.
 
 - Library scan progress stuck at 0% (per-file progress callbacks, SSE-friendly nginx config)
 
-[Unreleased]: https://github.com/151henry151/rompmusic-server/compare/v0.1.0-beta.16...HEAD
+[Unreleased]: https://github.com/151henry151/rompmusic-server/compare/v0.1.0-beta.17...HEAD
+[0.1.0-beta.17]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.0-beta.17
 [0.1.0-beta.16]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.0-beta.16
 [0.1.0-beta.15]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.0-beta.15
 [0.1.0-beta.14]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.0-beta.14
