@@ -13,15 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.4] - 2026-02-14
 
-Version sync with umbrella and client.
+Synchronize server version metadata with umbrella/client `0.1.4` release references.
 
 ## [0.1.3] - 2026-02-14
 
-Version sync with umbrella and client.
+Synchronize server version metadata with umbrella/client `0.1.3` release references.
 
 ## [0.1.1] - 2026-02-14
 
-Version sync with umbrella and client.
+Synchronize server version metadata with umbrella/client `0.1.1` release references.
 
 ## [0.1.0] - 2026-02-14
 
@@ -29,31 +29,31 @@ First stable release. Version sync with umbrella and client.
 
 ### Changed
 
-- Version set to 0.1.0 (no longer beta)
+- Set version to `0.1.0` and drop beta designation.
 
 ## [0.1.0-beta.17] - 2026-03-01
 
 ### Changed
 
-- Version sync with umbrella and other submodules (no server-specific changes this release)
+- Synchronize version metadata with umbrella/client beta.17 release references (no server-specific code changes).
 
-## [0.1.0-beta.16] - 2026-02-16
-
-### Changed
-
-- Version sync with umbrella and other submodules (no server-specific changes this release)
-
-## [0.1.0-beta.15] - 2026-03-16
+## [0.1.0-beta.16] - 2026-03-01
 
 ### Changed
 
-- Version sync with umbrella and other submodules (no server-specific changes this release)
+- Synchronize version metadata with umbrella/client beta.16 release references (no server-specific code changes).
+
+## [0.1.0-beta.15] - 2026-03-01
+
+### Changed
+
+- Synchronize version metadata with umbrella/client beta.15 release references (no server-specific code changes).
 
 ## [0.1.0-beta.14] - 2026-03-01
 
 ### Changed
 
-- Version sync with umbrella and other submodules (no server-specific changes this release)
+- Synchronize version metadata with umbrella/client beta.14 release references (no server-specific code changes).
 
 ## [0.1.0-beta.1] - 2025-02-15
 
@@ -61,18 +61,18 @@ First beta release. Part of RompMusic 0.1.0-beta.1.
 
 ### Added
 
-- FastAPI backend with PostgreSQL and Redis
-- Library scanner with Mutagen for metadata (MP3, FLAC, M4A, OGG, OGA, Opus)
-- Server-Sent Events (SSE) stream for live scan progress
-- Admin dashboard with login, library statistics, and scan UI
-- Live startup status messages: "Opening music directory", "Discovering files", "Found N files", per-file progress
-- JWT authentication and admin user creation
-- REST API for library, search, streaming, playlists, artwork
-- Swagger and ReDoc API documentation
+- Build FastAPI backend services with PostgreSQL and Redis.
+- Implement library scanning with Mutagen metadata parsing (MP3, FLAC, M4A, OGG, OGA, Opus).
+- Stream live scan progress over Server-Sent Events (SSE).
+- Add admin dashboard login, library statistics, and scan controls.
+- Emit startup status messages ("Opening music directory", "Discovering files", "Found N files") plus per-file progress.
+- Add JWT authentication and admin-user creation.
+- Expose REST APIs for library, search, streaming, playlists, and artwork.
+- Publish Swagger and ReDoc API documentation.
 
 ### Fixed
 
-- Library scan progress stuck at 0% (per-file progress callbacks, SSE-friendly nginx config)
+- Emit per-file scan progress callbacks and apply SSE-friendly nginx buffering settings so progress updates stream continuously.
 
 [Unreleased]: https://github.com/151henry151/rompmusic-server/compare/v0.1.4...HEAD
 [0.1.4]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.4
