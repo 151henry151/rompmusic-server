@@ -222,11 +222,11 @@ async def scan_library(
 
         # Update album has_artwork and artwork_hash when we find embedded art
         album_result = await session.execute(select(Album).where(Album.id == album_id))
-        album = album_result.scalar_one()
-        if album.has_artwork is not True:
+        album = album_result.scalars().first()
+        if album is not None and album.has_artwork is not True:
             has_art = await loop.run_in_executor(None, has_artwork_in_file, file_path)
             album.has_artwork = has_art
-        if album.has_artwork is True and album.artwork_hash is None:
+        if album is not None and album.has_artwork is True and album.artwork_hash is None:
             artwork = await loop.run_in_executor(None, extract_artwork_from_file, file_path)
             if artwork:
                 album.artwork_hash = artwork_hash_from_bytes(artwork[0])
