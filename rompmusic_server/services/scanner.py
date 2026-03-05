@@ -170,7 +170,7 @@ async def scan_library(
 
         if artist_name not in artists_map:
             result = await session.execute(select(Artist).where(Artist.name == artist_name))
-            artist = result.scalar_one_or_none()
+            artist = result.scalars().first()
             if not artist:
                 artist = Artist(name=artist_name)
                 session.add(artist)
@@ -189,7 +189,7 @@ async def scan_library(
             else:
                 album_cond = (Album.title == album_title) & (Album.year == year_val)
             result = await session.execute(select(Album).where(album_cond))
-            album = result.scalar_one_or_none()
+            album = result.scalars().first()
             if not album:
                 album = Album(
                     title=album_title,
@@ -205,7 +205,7 @@ async def scan_library(
         result = await session.execute(
             select(Track).where(Track.file_path == rel_path)
         )
-        if result.scalar_one_or_none() is None:
+        if result.scalars().first() is None:
             track = Track(
                 title=meta["title"] or file_path.stem,
                 album_id=album_id,
