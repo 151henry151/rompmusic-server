@@ -4,7 +4,7 @@
 """Library API routes - artists, albums, tracks."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import desc, func, select
+from sqlalchemy import and_, desc, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rompmusic_server.auth import get_current_user_id, get_optional_user_id, get_user_id_or_anonymous
@@ -14,6 +14,16 @@ from rompmusic_server.api.schemas import AlbumResponse, ArtistResponse, TrackRes
 from rompmusic_server.services.metadata_quality import is_home_quality_track
 
 router = APIRouter(prefix="/library", tags=["library"])
+
+
+def _normalized_terms(raw_search: str | None) -> list[str]:
+    if not raw_search:
+        return []
+    return [part for part in raw_search.strip().lower().split() if part]
+
+
+def _contains_ci(column, term: str):
+    return func.lower(func.coalesce(column, "")).contains(term)
 
 
 def _artist_order(q, sort_by: str, order: str):
@@ -56,8 +66,6 @@ async def list_artists(
     db: AsyncSession = Depends(get_db),
 ) -> list[ArtistResponse]:
     """List artists with optional search and sort."""
-    from sqlalchemy import exists, or_
-
     has_artwork_subq = exists().where(Album.artist_id == Artist.id).where(Album.has_artwork == True)
     q = select(
         Artist,
@@ -65,8 +73,9 @@ async def list_artists(
         _artist_primary_album_id().label("primary_album_id"),
         _artist_primary_album_title().label("primary_album_title"),
     )
-    if search:
-        q = q.where(Artist.name.ilike(f"%{search}%"))
+    terms = _normalized_terms(search)
+    if terms:
+        q = q.where(and_(*[_contains_ci(Artist.name, term) for term in terms]))
     if home:
         q = q.join(Album, Album.artist_id == Artist.id).where(Album.has_artwork == True)
         q = q.distinct()
@@ -159,20 +168,25 @@ async def list_albums(
     When search is set, matches album title, artist name, or any track title on the album.
     When artwork_first is true, albums with artwork are listed before those without.
     """
-    from sqlalchemy import asc, exists, func, or_
+    from sqlalchemy import asc
     q = select(Album, Artist.name).join(Artist, Album.artist_id == Artist.id)
     if artist_id:
         q = q.where(Album.artist_id == artist_id)
-    if search:
-        pattern = f"%{search}%"
-        album_has_matching_track = exists().where(Track.album_id == Album.id).where(Track.title.ilike(pattern))
-        q = q.where(
-            or_(
-                Album.title.ilike(pattern),
-                Artist.name.ilike(pattern),
-                album_has_matching_track,
+    terms = _normalized_terms(search)
+    if terms:
+        per_term = []
+        for term in terms:
+            album_has_matching_track = (
+                exists().where(Track.album_id == Album.id).where(_contains_ci(Track.title, term))
             )
-        )
+            per_term.append(
+                or_(
+                    _contains_ci(Album.title, term),
+                    _contains_ci(Artist.name, term),
+                    album_has_matching_track,
+                )
+            )
+        q = q.where(and_(*per_term))
     if random:
         q = q.order_by(func.random()).offset(skip).limit(limit)
     else:
@@ -280,8 +294,9 @@ async def list_tracks(
         q = q.where(Track.album_id == album_id)
     if artist_id:
         q = q.where(Track.artist_id == artist_id)
-    if search:
-        q = q.where(Track.title.ilike(f"%{search}%"))
+    terms = _normalized_terms(search)
+    if terms:
+        q = q.where(and_(*[_contains_ci(Track.title, term) for term in terms]))
     q = _track_order(q, sort_by, order, album_id=album_id).offset(skip).limit(limit)
     result = await db.execute(q)
     rows = result.all()

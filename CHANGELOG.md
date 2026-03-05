@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Changed
 
-- (Changes since last release will be listed here)
+- Normalize search input into lowercase tokens before applying filters.
+
+### Fixed
+
+- Replace phrase-level `ilike` matching with tokenized case-insensitive matching in `/search` for artists, albums, and tracks.
+- Apply tokenized case-insensitive matching to `/library/artists`, `/library/albums`, and `/library/tracks` search filters.
 
 ## [0.1.5] - 2026-03-05
 

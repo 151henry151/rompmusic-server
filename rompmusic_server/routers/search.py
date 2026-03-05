@@ -4,7 +4,7 @@
 """Search API - search across artists, albums, tracks."""
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import exists, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rompmusic_server.auth import get_optional_user_id
@@ -13,6 +13,14 @@ from rompmusic_server.models import Album, Artist, Track
 from rompmusic_server.api.schemas import AlbumResponse, ArtistResponse, TrackResponse
 
 router = APIRouter(prefix="/search", tags=["search"])
+
+
+def _normalized_terms(raw_query: str) -> list[str]:
+    return [part for part in raw_query.strip().lower().split() if part]
+
+
+def _contains_ci(column, term: str):
+    return func.lower(func.coalesce(column, "")).contains(term)
 
 
 @router.get("")
@@ -25,7 +33,9 @@ async def search(
     Search artists, albums, and tracks.
     Returns combined results with type indicator.
     """
-    pattern = f"%{q}%"
+    terms = _normalized_terms(q)
+    if not terms:
+        return {"artists": [], "albums": [], "tracks": []}
 
     from rompmusic_server.routers.library import (
         _artist_primary_album_id,
@@ -40,7 +50,7 @@ async def search(
             _artist_primary_album_id().label("primary_album_id"),
             _artist_primary_album_title().label("primary_album_title"),
         )
-        .where(Artist.name.ilike(pattern))
+        .where(and_(*[_contains_ci(Artist.name, term) for term in terms]))
         .limit(limit)
     )
     artists = [
@@ -59,7 +69,17 @@ async def search(
     albums_result = await db.execute(
         select(Album, Artist.name)
         .join(Artist, Album.artist_id == Artist.id)
-        .where(or_(Album.title.ilike(pattern), Artist.name.ilike(pattern)))
+        .where(
+            and_(
+                *[
+                    or_(
+                        _contains_ci(Album.title, term),
+                        _contains_ci(Artist.name, term),
+                    )
+                    for term in terms
+                ]
+            )
+        )
         .limit(limit)
     )
     albums = [
@@ -80,10 +100,15 @@ async def search(
         .join(Album, Track.album_id == Album.id)
         .join(Artist, Track.artist_id == Artist.id)
         .where(
-            or_(
-                Track.title.ilike(pattern),
-                Album.title.ilike(pattern),
-                Artist.name.ilike(pattern),
+            and_(
+                *[
+                    or_(
+                        _contains_ci(Track.title, term),
+                        _contains_ci(Album.title, term),
+                        _contains_ci(Artist.name, term),
+                    )
+                    for term in terms
+                ]
             )
         )
         .limit(limit)
