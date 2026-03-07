@@ -4,6 +4,7 @@
 """Music library scanner using Mutagen for metadata extraction."""
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -132,11 +133,29 @@ async def scan_library(
             0, 0, 0,
         )
 
-    def walk_files() -> list[Path]:
-        files = []
-        for ext in SUPPORTED_EXTENSIONS:
-            files.extend(music_path.rglob(f"*{ext}"))
-        return files
+    def walk_files() -> list[tuple[Path, str]]:
+        """Walk music_path following symlinks; yield (physical_path, logical_rel_path) for each audio file.
+        logical_rel_path is the path relative to music_path for DB/storage (so symlinked dirs appear as Romp/..., not resolved)."""
+        result: list[tuple[Path, str]] = []
+
+        def recurse(physical_dir: Path, logical_prefix: str) -> None:
+            try:
+                with os.scandir(physical_dir) as entries:
+                    for entry in entries:
+                        if entry.is_file(follow_symlinks=False):
+                            suf = Path(entry.name).suffix.lower()
+                            if suf in SUPPORTED_EXTENSIONS:
+                                rel = f"{logical_prefix}/{entry.name}" if logical_prefix else entry.name
+                                result.append((Path(entry.path), rel))
+                        elif entry.is_dir(follow_symlinks=True):
+                            next_physical = Path(entry.path)
+                            next_logical = f"{logical_prefix}/{entry.name}" if logical_prefix else entry.name
+                            recurse(next_physical, next_logical)
+            except OSError:
+                pass
+
+        recurse(music_path, "")
+        return result
 
     loop = asyncio.get_event_loop()
     files = await loop.run_in_executor(None, walk_files)
@@ -152,8 +171,7 @@ async def scan_library(
     if total == 0:
         return {"artists": 0, "albums": 0, "tracks": 0}
 
-    for idx, file_path in enumerate(files):
-        rel_path = str(file_path.relative_to(music_path))
+    for idx, (file_path, rel_path) in enumerate(files):
         if rel_path in seen_tracks:
             if on_progress:
                 on_progress(idx + 1, total, rel_path[:60] + ("..." if len(rel_path) > 60 else ""), len(artists_map), len(albums_map), len(seen_tracks))

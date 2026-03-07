@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (Changes since last release will be listed here)
 
+### Changed
+
+- Make library scanner follow symlinks so content under symlinked artist directories is indexed.
+
 ## [0.1.10] - 2026-03-07
 
 ### Changed
