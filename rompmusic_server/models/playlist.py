@@ -4,7 +4,7 @@
 """Playlist models."""
 
 from datetime import datetime
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from rompmusic_server.models.base import Base
@@ -21,13 +21,19 @@ class Playlist(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     user: Mapped["User"] = relationship("User", back_populates="playlists")
     tracks: Mapped[list["PlaylistTrack"]] = relationship(
         "PlaylistTrack",
         back_populates="playlist",
         cascade="all, delete-orphan",
-        order_by="PlaylistTrack.position",
+        order_by="PlaylistTrack.position, PlaylistTrack.id",
     )
 
 
@@ -35,12 +41,20 @@ class PlaylistTrack(Base):
     """Track in a playlist with position."""
 
     __tablename__ = "playlist_tracks"
+    __table_args__ = (
+        UniqueConstraint(
+            "playlist_id",
+            "position",
+            name="uq_playlist_tracks_playlist_id_position",
+        ),
+    )
 
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     playlist_id: Mapped[int] = mapped_column(
-        ForeignKey("playlists.id", ondelete="CASCADE"), primary_key=True
+        ForeignKey("playlists.id", ondelete="CASCADE"), nullable=False
     )
     track_id: Mapped[int] = mapped_column(
-        ForeignKey("tracks.id", ondelete="CASCADE"), primary_key=True
+        ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     added_at: Mapped[datetime] = mapped_column(

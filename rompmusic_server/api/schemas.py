@@ -5,7 +5,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 # Auth
@@ -97,29 +97,47 @@ class TrackResponse(BaseModel):
 
 
 # Playlist
+class PlaylistTrackOut(BaseModel):
+    id: int
+    title: str
+    album_id: int
+    artist_id: int
+    artist: str
+    album: str
+    duration: float
+    position: int
+
+
 class PlaylistCreate(BaseModel):
     name: str
     description: str | None = None
-    is_public: bool = False
 
 
 class PlaylistUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
-    is_public: bool | None = None
 
 
-class PlaylistResponse(BaseModel):
+class PlaylistSummary(BaseModel):
     id: int
     name: str
     description: str | None = None
-    is_public: bool
+    owner_id: int
     created_at: datetime
+    updated_at: datetime
     track_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)
 
 
-class PlaylistTrackAdd(BaseModel):
+class PlaylistOut(PlaylistSummary):
+    tracks: list[PlaylistTrackOut] = Field(default_factory=list)
+
+
+class AddTrackRequest(BaseModel):
     track_id: int
     position: int | None = None
+
+
+class ReorderRequest(BaseModel):
+    track_ids: list[int]
