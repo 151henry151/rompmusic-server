@@ -9,7 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- (Changes since last release will be listed here)
+- Add playlist response schemas with ordered track payloads, playlist summaries, add-track, and reorder request models.
+- Add playlist CRUD/track-management API routes with per-user ownership enforcement, ordered inserts/removals, and atomic reorder validation.
+- Add `0003_playlists_ordering` Alembic migration to add `playlists.updated_at`, convert `playlist_tracks` to row IDs, and enforce unique `(playlist_id, position)`.
+- Add playlist API test coverage for create/list/get/update, track add/remove/reorder, ownership checks, and not-found behavior.
+
+### Changed
+
+- Update `0002_play_history_anonymous` migration to use SQLAlchemy column/type classes and idempotent schema checks during upgrade/downgrade.
+- Update test fixtures to dispose the async DB pool between tests to avoid cross-event-loop connection reuse.
 
 ## [0.1.0-beta.5] - 2026-02-19
 

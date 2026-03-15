@@ -3,209 +3,325 @@
 
 """Playlist API routes."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from collections import Counter, defaultdict
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from rompmusic_server.api.schemas import (
+    AddTrackRequest,
+    PlaylistCreate,
+    PlaylistOut,
+    PlaylistSummary,
+    PlaylistTrackOut,
+    PlaylistUpdate,
+    ReorderRequest,
+)
 from rompmusic_server.auth import get_current_user_id
 from rompmusic_server.database import get_db
 from rompmusic_server.models import Album, Artist, Playlist, PlaylistTrack, Track
-from rompmusic_server.api.schemas import (
-    PlaylistCreate,
-    PlaylistTrackAdd,
-    PlaylistUpdate,
-    PlaylistResponse,
-    TrackResponse,
-)
 
 router = APIRouter(prefix="/playlists", tags=["playlists"])
 
 
-@router.get("", response_model=list[PlaylistResponse])
+async def _get_playlist_or_error(db: AsyncSession, playlist_id: int, user_id: int) -> Playlist:
+    playlist = await db.scalar(select(Playlist).where(Playlist.id == playlist_id))
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    if playlist.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return playlist
+
+
+async def _list_playlist_tracks(db: AsyncSession, playlist_id: int) -> list[PlaylistTrackOut]:
+    rows = (
+        await db.execute(
+            select(
+                PlaylistTrack.position,
+                Track.id,
+                Track.title,
+                Track.album_id,
+                Track.artist_id,
+                Artist.name,
+                Album.title,
+                Track.duration,
+            )
+            .join(Track, PlaylistTrack.track_id == Track.id)
+            .join(Artist, Track.artist_id == Artist.id)
+            .join(Album, Track.album_id == Album.id)
+            .where(PlaylistTrack.playlist_id == playlist_id)
+            .order_by(PlaylistTrack.position.asc(), PlaylistTrack.id.asc())
+        )
+    ).all()
+    return [
+        PlaylistTrackOut(
+            id=track_id,
+            title=track_title,
+            album_id=album_id,
+            artist_id=artist_id,
+            artist=artist_name,
+            album=album_title,
+            duration=duration,
+            position=position,
+        )
+        for (
+            position,
+            track_id,
+            track_title,
+            album_id,
+            artist_id,
+            artist_name,
+            album_title,
+            duration,
+        ) in rows
+    ]
+
+
+async def _build_playlist_out(db: AsyncSession, playlist: Playlist) -> PlaylistOut:
+    tracks = await _list_playlist_tracks(db, playlist.id)
+    return PlaylistOut(
+        id=playlist.id,
+        name=playlist.name,
+        description=playlist.description,
+        owner_id=playlist.user_id,
+        created_at=playlist.created_at,
+        updated_at=playlist.updated_at,
+        track_count=len(tracks),
+        tracks=tracks,
+    )
+
+
+async def _normalize_positions(db: AsyncSession, playlist_id: int) -> None:
+    rows = (
+        await db.execute(
+            select(PlaylistTrack)
+            .where(PlaylistTrack.playlist_id == playlist_id)
+            .order_by(PlaylistTrack.position.asc(), PlaylistTrack.id.asc())
+        )
+    ).scalars().all()
+    for index, row in enumerate(rows):
+        row.position = index
+
+
+def _normalize_description(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+@router.get("", response_model=list[PlaylistSummary])
 async def list_playlists(
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
-) -> list[PlaylistResponse]:
-    """List current user's playlists."""
-    result = await db.execute(
-        select(Playlist).where(Playlist.user_id == user_id).order_by(Playlist.name)
-    )
-    playlists = result.scalars().all()
-    out = []
-    from sqlalchemy import func
-    for p in playlists:
-        cnt_result = await db.scalar(
-            select(func.count()).select_from(PlaylistTrack).where(PlaylistTrack.playlist_id == p.id)
+) -> list[PlaylistSummary]:
+    playlists = (
+        await db.execute(
+            select(Playlist)
+            .where(Playlist.user_id == user_id)
+            .order_by(Playlist.updated_at.desc(), Playlist.id.desc())
         )
-        cnt = cnt_result or 0
-        out.append(
-            PlaylistResponse(
-                id=p.id,
-                name=p.name,
-                description=p.description,
-                is_public=p.is_public,
-                created_at=p.created_at,
-                track_count=cnt,
-            )
+    ).scalars().all()
+    if not playlists:
+        return []
+    playlist_ids = [playlist.id for playlist in playlists]
+    counts = (
+        await db.execute(
+            select(PlaylistTrack.playlist_id, func.count(PlaylistTrack.id))
+            .where(PlaylistTrack.playlist_id.in_(playlist_ids))
+            .group_by(PlaylistTrack.playlist_id)
         )
-    return out
+    ).all()
+    count_by_playlist = {playlist_id: int(count) for playlist_id, count in counts}
+    return [
+        PlaylistSummary(
+            id=playlist.id,
+            name=playlist.name,
+            description=playlist.description,
+            owner_id=playlist.user_id,
+            created_at=playlist.created_at,
+            updated_at=playlist.updated_at,
+            track_count=count_by_playlist.get(playlist.id, 0),
+        )
+        for playlist in playlists
+    ]
 
 
-@router.post("", response_model=PlaylistResponse)
+@router.post("", response_model=PlaylistOut)
 async def create_playlist(
     data: PlaylistCreate,
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
-) -> PlaylistResponse:
-    """Create a new playlist."""
+) -> PlaylistOut:
+    name = data.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Playlist name is required")
     playlist = Playlist(
         user_id=user_id,
-        name=data.name,
-        description=data.description,
-        is_public=data.is_public,
+        name=name,
+        description=_normalize_description(data.description),
+        is_public=False,
     )
     db.add(playlist)
-    await db.commit()
+    await db.flush()
     await db.refresh(playlist)
-    return PlaylistResponse(
-        id=playlist.id,
-        name=playlist.name,
-        description=playlist.description,
-        is_public=playlist.is_public,
-        created_at=playlist.created_at,
-        track_count=0,
-    )
+    return await _build_playlist_out(db, playlist)
 
 
-@router.get("/{playlist_id}", response_model=PlaylistResponse)
+@router.get("/{playlist_id}", response_model=PlaylistOut)
 async def get_playlist(
     playlist_id: int,
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
-) -> PlaylistResponse:
-    """Get playlist by ID."""
-    result = await db.execute(
-        select(Playlist).where(
-            Playlist.id == playlist_id,
-            Playlist.user_id == user_id,
-        )
-    )
-    playlist = result.scalar_one_or_none()
-    if not playlist:
-        raise HTTPException(status_code=404, detail="Playlist not found")
-    return PlaylistResponse(
-        id=playlist.id,
-        name=playlist.name,
-        description=playlist.description,
-        is_public=playlist.is_public,
-        created_at=playlist.created_at,
-        track_count=len(playlist.tracks),
-    )
+) -> PlaylistOut:
+    playlist = await _get_playlist_or_error(db, playlist_id, user_id)
+    return await _build_playlist_out(db, playlist)
 
 
-@router.get("/{playlist_id}/tracks", response_model=list[TrackResponse])
-async def get_playlist_tracks(
+@router.put("/{playlist_id}", response_model=PlaylistOut)
+async def update_playlist(
+    playlist_id: int,
+    data: PlaylistUpdate,
+    user_id: int = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> PlaylistOut:
+    playlist = await _get_playlist_or_error(db, playlist_id, user_id)
+    if data.name is not None:
+        name = data.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Playlist name is required")
+        playlist.name = name
+    if data.description is not None:
+        playlist.description = _normalize_description(data.description)
+    playlist.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+    await db.refresh(playlist)
+    return await _build_playlist_out(db, playlist)
+
+
+@router.delete("/{playlist_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_playlist(
     playlist_id: int,
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
-) -> list[TrackResponse]:
-    """Get tracks in a playlist."""
-    result = await db.execute(
-        select(Playlist).where(
-            Playlist.id == playlist_id,
-            Playlist.user_id == user_id,
-        )
-    )
-    playlist = result.scalar_one_or_none()
-    if not playlist:
-        raise HTTPException(status_code=404, detail="Playlist not found")
-
-    # Load playlist tracks with track, album, artist
-    pt_result = await db.execute(
-        select(PlaylistTrack, Track, Album.title, Artist.name)
-        .join(Track, PlaylistTrack.track_id == Track.id)
-        .join(Album, Track.album_id == Album.id)
-        .join(Artist, Track.artist_id == Artist.id)
-        .where(PlaylistTrack.playlist_id == playlist_id)
-        .order_by(PlaylistTrack.position)
-    )
-    rows = pt_result.all()
-    return [
-        TrackResponse(
-            id=t.id,
-            title=t.title,
-            album_id=t.album_id,
-            artist_id=t.artist_id,
-            album_title=at,
-            artist_name=an,
-            track_number=t.track_number,
-            disc_number=t.disc_number,
-            duration=t.duration,
-            bitrate=t.bitrate,
-            format=t.format,
-        )
-        for _, t, at, an in rows
-    ]
+) -> Response:
+    playlist = await _get_playlist_or_error(db, playlist_id, user_id)
+    await db.delete(playlist)
+    await db.flush()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/{playlist_id}/tracks")
+@router.post("/{playlist_id}/tracks", response_model=PlaylistOut)
 async def add_track_to_playlist(
     playlist_id: int,
-    data: PlaylistTrackAdd,
+    data: AddTrackRequest,
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Add a track to a playlist."""
-    result = await db.execute(
-        select(Playlist).where(
-            Playlist.id == playlist_id,
-            Playlist.user_id == user_id,
-        )
-    )
-    playlist = result.scalar_one_or_none()
-    if not playlist:
-        raise HTTPException(status_code=404, detail="Playlist not found")
-
-    track_result = await db.execute(select(Track).where(Track.id == data.track_id))
-    if not track_result.scalar_one_or_none():
+) -> PlaylistOut:
+    playlist = await _get_playlist_or_error(db, playlist_id, user_id)
+    track_exists = await db.scalar(select(Track.id).where(Track.id == data.track_id))
+    if not track_exists:
         raise HTTPException(status_code=404, detail="Track not found")
 
-    max_pos = max((pt.position for pt in playlist.tracks), default=0)
-    position = data.position if data.position is not None else max_pos + 1
+    current_tracks = (
+        await db.execute(
+            select(PlaylistTrack.id)
+            .where(PlaylistTrack.playlist_id == playlist_id)
+            .order_by(PlaylistTrack.position.asc(), PlaylistTrack.id.asc())
+        )
+    ).scalars().all()
+    target_position = len(current_tracks) if data.position is None else data.position
+    if target_position < 0 or target_position > len(current_tracks):
+        raise HTTPException(status_code=400, detail="Invalid position")
 
-    pt = PlaylistTrack(
-        playlist_id=playlist_id,
-        track_id=data.track_id,
-        position=position,
+    await db.execute(
+        update(PlaylistTrack)
+        .where(
+            PlaylistTrack.playlist_id == playlist_id,
+            PlaylistTrack.position >= target_position,
+        )
+        .values(position=PlaylistTrack.position + 1)
     )
-    db.add(pt)
-    await db.commit()
-    return {"status": "ok"}
+    db.add(
+        PlaylistTrack(
+            playlist_id=playlist_id,
+            track_id=data.track_id,
+            position=target_position,
+        )
+    )
+    await db.flush()
+    await _normalize_positions(db, playlist_id)
+    playlist.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+    await db.refresh(playlist)
+    return await _build_playlist_out(db, playlist)
 
 
-@router.delete("/{playlist_id}/tracks/{track_id}")
+@router.delete("/{playlist_id}/tracks/{track_id}", response_model=PlaylistOut)
 async def remove_track_from_playlist(
     playlist_id: int,
     track_id: int,
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Remove a track from a playlist."""
-    result = await db.execute(
-        select(Playlist).where(
-            Playlist.id == playlist_id,
-            Playlist.user_id == user_id,
-        )
-    )
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Playlist not found")
-
-    from sqlalchemy import delete
-    await db.execute(
-        delete(PlaylistTrack).where(
+) -> PlaylistOut:
+    playlist = await _get_playlist_or_error(db, playlist_id, user_id)
+    playlist_track = await db.scalar(
+        select(PlaylistTrack)
+        .where(
             PlaylistTrack.playlist_id == playlist_id,
             PlaylistTrack.track_id == track_id,
         )
+        .order_by(PlaylistTrack.position.asc(), PlaylistTrack.id.asc())
     )
-    await db.commit()
-    return {"status": "ok"}
+    if not playlist_track:
+        raise HTTPException(status_code=404, detail="Track not found in playlist")
+    await db.delete(playlist_track)
+    await db.flush()
+    await _normalize_positions(db, playlist_id)
+    playlist.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+    await db.refresh(playlist)
+    return await _build_playlist_out(db, playlist)
+
+
+@router.put("/{playlist_id}/tracks/reorder", response_model=PlaylistOut)
+async def reorder_playlist_tracks(
+    playlist_id: int,
+    data: ReorderRequest,
+    user_id: int = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> PlaylistOut:
+    playlist = await _get_playlist_or_error(db, playlist_id, user_id)
+    current_playlist_tracks = (
+        await db.execute(
+            select(PlaylistTrack)
+            .where(PlaylistTrack.playlist_id == playlist_id)
+            .order_by(PlaylistTrack.position.asc(), PlaylistTrack.id.asc())
+        )
+    ).scalars().all()
+    current_track_ids = [playlist_track.track_id for playlist_track in current_playlist_tracks]
+    if len(data.track_ids) != len(current_track_ids):
+        raise HTTPException(status_code=400, detail="Provided track IDs must match playlist contents")
+    if Counter(data.track_ids) != Counter(current_track_ids):
+        raise HTTPException(status_code=400, detail="Provided track IDs must match playlist contents")
+
+    # Move every row out of the 0..N-1 range first to avoid unique-position collisions.
+    offset = len(current_playlist_tracks)
+    for index, playlist_track in enumerate(current_playlist_tracks):
+        playlist_track.position = offset + index
+    await db.flush()
+
+    track_id_to_rows: dict[int, list[PlaylistTrack]] = defaultdict(list)
+    for playlist_track in current_playlist_tracks:
+        track_id_to_rows[playlist_track.track_id].append(playlist_track)
+
+    for new_position, track_id in enumerate(data.track_ids):
+        playlist_track = track_id_to_rows[track_id].pop(0)
+        playlist_track.position = new_position
+
+    playlist.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+    await db.refresh(playlist)
+    return await _build_playlist_out(db, playlist)
