@@ -9,19 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Add playlist response schemas with ordered track payloads, playlist summaries, add-track, and reorder request models.
-- Add playlist CRUD/track-management API routes with per-user ownership enforcement, ordered inserts/removals, and atomic reorder validation.
-- Add `0003_playlists_ordering` Alembic migration to add `playlists.updated_at`, convert `playlist_tracks` to row IDs, and enforce unique `(playlist_id, position)`.
-- Add playlist API test coverage for create/list/get/update, track add/remove/reorder, ownership checks, and not-found behavior.
+- (Changes since last release will be listed here)
 
 ### Changed
 
-- Update `0002_play_history_anonymous` migration to use SQLAlchemy column/type classes and idempotent schema checks during upgrade/downgrade.
-- Update test fixtures to dispose the async DB pool between tests to avoid cross-event-loop connection reuse.
+- (Changes since last release will be listed here)
+
+### Fixed
+
+- (Changes since last release will be listed here)
+
+## [0.1.11] - 2026-03-14
+
+### Added
+
+- Add per-user playlist API: create, list, get, update, delete playlists; add, reorder, remove tracks; playlist ordering migration.
 
 ### Changed
 
 - Make library scanner follow symlinks so content under symlinked artist directories is indexed.
+
+### Fixed
+
+- Strip null bytes from file metadata (artist, album, title) before database use so PostgreSQL UTF-8 text columns do not raise CharacterNotInRepertoireError.
 
 ## [0.1.10] - 2026-03-07
 
@@ -132,7 +142,8 @@ First beta release. Part of RompMusic 0.1.0-beta.1.
 
 - Emit per-file scan progress callbacks and apply SSE-friendly nginx buffering settings so progress updates stream continuously.
 
-[Unreleased]: https://github.com/151henry151/rompmusic-server/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/151henry151/rompmusic-server/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.11
 [0.1.10]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.10
 [0.1.9]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.9
 [0.1.8]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.8
