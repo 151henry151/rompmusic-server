@@ -13,6 +13,8 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir -e .
 
 COPY rompmusic_server ./rompmusic_server
+COPY alembic.ini alembic.ini
+COPY alembic ./alembic
 COPY .env.example .env
 
 ENV PYTHONUNBUFFERED=1

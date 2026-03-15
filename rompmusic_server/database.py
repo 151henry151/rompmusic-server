@@ -3,10 +3,16 @@
 
 """Database connection and session management."""
 
+import asyncio
+import logging
+from pathlib import Path
+
 from collections.abc import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from rompmusic_server.config import settings
 from rompmusic_server.models.base import Base
+
+logger = logging.getLogger(__name__)
 
 engine = create_async_engine(
     settings.database_url,
@@ -78,3 +84,16 @@ async def init_db() -> None:
             """))
         except Exception:
             pass
+
+    # Run Alembic migrations (e.g. playlists tables) so schema is up to date
+    alembic_ini = Path(__file__).resolve().parent.parent / "alembic.ini"
+    if alembic_ini.exists():
+        try:
+            from alembic import command
+            from alembic.config import Config
+            alembic_cfg = Config(str(alembic_ini))
+            alembic_cfg.set_main_option("sqlalchemy.url", str(settings.database_url))
+            await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
+            logger.info("Alembic migrations applied")
+        except Exception as e:
+            logger.warning("Alembic migrations skipped: %s", e)

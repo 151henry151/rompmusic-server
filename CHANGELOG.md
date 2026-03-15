@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- (Changes since last release will be listed here)
+- Run Alembic migrations on startup so playlist tables and schema stay up to date.
+- Add `alembic.ini` and `alembic/` to Docker image so migrations can run in the container.
 
 ### Fixed
 
