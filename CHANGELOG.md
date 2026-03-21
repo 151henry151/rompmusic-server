@@ -13,12 +13,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Run Alembic migrations on startup so playlist tables and schema stay up to date.
-- Add `alembic.ini` and `alembic/` to Docker image so migrations can run in the container.
+- (Changes since last release will be listed here)
 
 ### Fixed
 
 - (Changes since last release will be listed here)
+
+## [0.1.12] - 2026-03-21
+
+### Added
+
+- Add tests for Last.fm API integration (similar tracks and artist images) with mocked responses and optional live API key smoke test.
+
+### Changed
+
+- Run each library scan file inside a nested transaction; on failure log the path and exception and continue with remaining files.
+- Run Alembic migrations on startup so playlist tables and schema stay up to date.
+- Add `alembic.ini` and `alembic/` to Docker image so migrations can run in the container.
+- Match Last.fm similar tracks by artist when the exact track is not in the library (artist-only match with reduced score) so autoplay can suggest other artists from the same genre.
+- When no Last.fm API key is set, autoplay uses metadata-based recommendations: same artist (other albums, up to 2 tracks per album), similar release year (±5 years), and tracks from compilations that feature the seed artist; results are diversified across artists and albums.
+
+### Fixed
+
+- Prefer same-artist when Last.fm similar-tracks returns no matches so autoplay does not fill the queue with unrelated co-played artists (e.g. Beatles, Miles Davis when seeding from The Offspring).
 
 ## [0.1.11] - 2026-03-14
 
@@ -143,7 +160,8 @@ First beta release. Part of RompMusic 0.1.0-beta.1.
 
 - Emit per-file scan progress callbacks and apply SSE-friendly nginx buffering settings so progress updates stream continuously.
 
-[Unreleased]: https://github.com/151henry151/rompmusic-server/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/151henry151/rompmusic-server/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.12
 [0.1.11]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.11
 [0.1.10]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.10
 [0.1.9]: https://github.com/151henry151/rompmusic-server/releases/tag/v0.1.9

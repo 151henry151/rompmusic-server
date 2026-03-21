@@ -4,6 +4,7 @@
 """Music library scanner using Mutagen for metadata extraction."""
 
 import asyncio
+import logging
 import os
 from pathlib import Path
 from typing import Any, Callable
@@ -20,7 +21,19 @@ from rompmusic_server.config import settings
 from rompmusic_server.models import Artist, Album, Track, PlayHistory, PlaylistTrack
 from rompmusic_server.services.artwork import artwork_hash_from_bytes, extract_artwork_from_file, has_artwork_in_file
 
+logger = logging.getLogger(__name__)
+
 SUPPORTED_EXTENSIONS = {".mp3", ".flac", ".m4a", ".ogg", ".oga", ".opus"}
+
+
+def _sanitize_text_for_db(s: str | None) -> str:
+    """Remove null bytes and other disallowed UTF-8 for PostgreSQL text columns."""
+    if s is None:
+        return ""
+    out = str(s).replace("\x00", "")
+    # Strip other C0 control characters (except common whitespace)
+    out = "".join(c for c in out if ord(c) >= 32 or c in "\t\n\r")
+    return out.strip()
 
 
 def extract_metadata(file_path: Path) -> dict[str, Any] | None:
@@ -77,6 +90,14 @@ def extract_metadata(file_path: Path) -> dict[str, Any] | None:
             info["album"] = "Unknown Album"
         if not info["title"]:
             info["title"] = file_path.stem
+
+        # PostgreSQL rejects \\x00 in UTF-8 text; sanitize all strings we store
+        info["title"] = _sanitize_text_for_db(info.get("title")) or _sanitize_text_for_db(file_path.stem) or "Unknown Track"
+        info["artist"] = _sanitize_text_for_db(info.get("artist")) or "Unknown Artist"
+        info["album"] = _sanitize_text_for_db(info.get("album")) or "Unknown Album"
+        if info.get("album_artist") is not None:
+            aa = _sanitize_text_for_db(info["album_artist"])
+            info["album_artist"] = aa if aa else None
 
         return info
     except Exception:
@@ -185,71 +206,92 @@ async def scan_library(
 
         artist_name = meta["artist"] or "Unknown Artist"
         album_title = meta["album"] or "Unknown Album"
+        # Sanitize again for any path that bypassed extract_metadata defaults
+        artist_name = _sanitize_text_for_db(artist_name) or "Unknown Artist"
+        album_title = _sanitize_text_for_db(album_title) or "Unknown Album"
 
-        if artist_name not in artists_map:
-            result = await session.execute(select(Artist).where(Artist.name == artist_name))
-            artist = result.scalars().first()
-            if not artist:
-                artist = Artist(name=artist_name)
-                session.add(artist)
-                await session.flush()
-                new_artists += 1
-            artists_map[artist_name] = artist.id
+        try:
+            async with session.begin_nested():
+                artist_id: int
+                if artist_name in artists_map:
+                    artist_id = artists_map[artist_name]
+                else:
+                    result = await session.execute(select(Artist).where(Artist.name == artist_name))
+                    artist = result.scalars().first()
+                    if not artist:
+                        artist = Artist(name=artist_name)
+                        session.add(artist)
+                        await session.flush()
+                        new_artists += 1
+                    artist_id = artist.id
 
-        artist_id = artists_map[artist_name]
-        # Key by (album_title, year) so one album holds all tracks for that release regardless of
-        # per-track artist (e.g. "Doo-Bop" with "Miles Davis" and "Miles Davis Feat. Easy Mo Bee").
-        year_val = meta.get("year")
-        key = (album_title, year_val)
-        if key not in albums_map:
-            if year_val is None:
-                album_cond = (Album.title == album_title) & (Album.year.is_(None))
-            else:
-                album_cond = (Album.title == album_title) & (Album.year == year_val)
-            result = await session.execute(select(Album).where(album_cond))
-            album = result.scalars().first()
-            if not album:
-                album = Album(
-                    title=album_title,
-                    artist_id=artist_id,
-                    year=year_val,
+                year_val = meta.get("year")
+                key = (album_title, year_val)
+                album_id: int
+                if key in albums_map:
+                    album_id = albums_map[key]
+                else:
+                    if year_val is None:
+                        album_cond = (Album.title == album_title) & (Album.year.is_(None))
+                    else:
+                        album_cond = (Album.title == album_title) & (Album.year == year_val)
+                    result = await session.execute(select(Album).where(album_cond))
+                    album = result.scalars().first()
+                    if not album:
+                        album = Album(
+                            title=album_title,
+                            artist_id=artist_id,
+                            year=year_val,
+                        )
+                        session.add(album)
+                        await session.flush()
+                        new_albums += 1
+                    album_id = album.id
+
+                result = await session.execute(
+                    select(Track).where(Track.file_path == rel_path)
                 )
-                session.add(album)
-                await session.flush()
-                new_albums += 1
-            albums_map[key] = album.id
+                if result.scalars().first() is None:
+                    track_title = _sanitize_text_for_db(meta.get("title") or file_path.stem) or "Unknown Track"
+                    track = Track(
+                        title=track_title,
+                        album_id=album_id,
+                        artist_id=artist_id,
+                        track_number=meta.get("track_number", 1),
+                        disc_number=meta.get("disc_number", 1),
+                        duration=meta["duration"],
+                        file_path=rel_path,
+                        bitrate=meta.get("bitrate"),
+                        format=file_path.suffix[1:].lower(),
+                    )
+                    session.add(track)
+                    new_tracks += 1
 
-        album_id = albums_map[key]
-        result = await session.execute(
-            select(Track).where(Track.file_path == rel_path)
-        )
-        if result.scalars().first() is None:
-            track = Track(
-                title=meta["title"] or file_path.stem,
-                album_id=album_id,
-                artist_id=artist_id,
-                track_number=meta.get("track_number", 1),
-                disc_number=meta.get("disc_number", 1),
-                duration=meta["duration"],
-                file_path=rel_path,
-                bitrate=meta.get("bitrate"),
-                format=file_path.suffix[1:].lower(),
-            )
-            session.add(track)
-            new_tracks += 1
+                album_result = await session.execute(select(Album).where(Album.id == album_id))
+                album = album_result.scalars().first()
+                if album is not None and album.has_artwork is not True:
+                    has_art = await loop.run_in_executor(None, has_artwork_in_file, file_path)
+                    album.has_artwork = has_art
+                if album is not None and album.has_artwork is True and album.artwork_hash is None:
+                    artwork = await loop.run_in_executor(None, extract_artwork_from_file, file_path)
+                    if artwork:
+                        album.artwork_hash = artwork_hash_from_bytes(artwork[0])
 
-        # Update album has_artwork and artwork_hash when we find embedded art
-        album_result = await session.execute(select(Album).where(Album.id == album_id))
-        album = album_result.scalars().first()
-        if album is not None and album.has_artwork is not True:
-            has_art = await loop.run_in_executor(None, has_artwork_in_file, file_path)
-            album.has_artwork = has_art
-        if album is not None and album.has_artwork is True and album.artwork_hash is None:
-            artwork = await loop.run_in_executor(None, extract_artwork_from_file, file_path)
-            if artwork:
-                album.artwork_hash = artwork_hash_from_bytes(artwork[0])
-
-        seen_tracks.add(rel_path)
+                artists_map[artist_name] = artist_id
+                albums_map[key] = album_id
+                seen_tracks.add(rel_path)
+        except Exception as e:
+            logger.warning("Scan skipped file %s: %s", rel_path, e, exc_info=True)
+            if on_progress:
+                on_progress(
+                    idx + 1,
+                    total,
+                    rel_path[:60] + ("..." if len(rel_path) > 60 else ""),
+                    len(artists_map),
+                    len(albums_map),
+                    len(seen_tracks),
+                )
+            continue
 
         if on_progress:
             on_progress(

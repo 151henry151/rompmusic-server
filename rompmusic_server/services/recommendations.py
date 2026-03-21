@@ -79,22 +79,38 @@ async def _fetch_lastfm_similar(
     return out
 
 
+def _str_similar(a: str, b: str) -> bool:
+    """True if two normalized strings are considered the same for matching."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if a in b or b in a:
+        return True
+    if len(a) >= 4 and len(b) >= 4 and a[:4] == b[:4]:
+        return True
+    return False
+
+
 async def _match_lastfm_to_library(
     db: AsyncSession,
     similar: list[tuple[str, str, float]],
     exclude_track_id: int,
     limit: int,
 ) -> list[tuple[int, float]]:
-    """Match Last.fm results to our library. Returns [(track_id, score), ...]."""
+    """
+    Match Last.fm results to our library. Returns [(track_id, score), ...].
+    First: exact (artist + track) matches with full score.
+    Then: artist-only matches (we have that artist but not the exact track) with reduced score
+    so similar-artist variety appears even when the exact track is not in the library.
+    """
     if not similar:
         return []
 
-    # Build list of (artist_norm, track_norm, lastfm_score) for matching
     targets = []
     for artist, track, score in similar:
         targets.append((_normalize_for_match(artist), _normalize_for_match(track), score))
 
-    # Fetch our tracks with artist name and title
     q = (
         select(Track.id, Artist.name, Track.title)
         .join(Album, Track.album_id == Album.id)
@@ -104,34 +120,34 @@ async def _match_lastfm_to_library(
     result = await db.execute(q)
     rows = result.all()
 
-    def _str_similar(a: str, b: str) -> bool:
-        if not a or not b:
-            return False
-        if a == b:
-            return True
-        if a in b or b in a:
-            return True
-        # First 6 chars match
-        if len(a) >= 4 and len(b) >= 4 and a[:4] == b[:4]:
-            return True
-        return False
-
     matched: list[tuple[int, float]] = []
     seen_ids: set[int] = set()
+
+    # 1) Exact (artist + track) matches with full Last.fm score
     for track_id, our_artist, our_title in rows:
-        if track_id in seen_ids:
-            continue
+        if track_id in seen_ids or len(matched) >= limit:
+            break
         our_a_norm = _normalize_for_match(our_artist or "")
         our_t_norm = _normalize_for_match(our_title or "")
         for lf_artist_norm, lf_track_norm, lf_score in targets:
-            a_ok = _str_similar(our_a_norm, lf_artist_norm)
-            t_ok = _str_similar(our_t_norm, lf_track_norm)
-            if a_ok and t_ok:
+            if _str_similar(our_a_norm, lf_artist_norm) and _str_similar(our_t_norm, lf_track_norm):
                 matched.append((track_id, lf_score))
                 seen_ids.add(track_id)
                 break
-        if len(matched) >= limit:
+
+    # 2) Artist-only matches: Last.fm said this artist is similar; add any of their tracks we have
+    artist_only_score_scale = 0.6
+    for track_id, our_artist, our_title in rows:
+        if track_id in seen_ids or len(matched) >= limit:
             break
+        our_a_norm = _normalize_for_match(our_artist or "")
+        for lf_artist_norm, _lf_track_norm, lf_score in targets:
+            if _str_similar(our_a_norm, lf_artist_norm):
+                score = lf_score * artist_only_score_scale
+                matched.append((track_id, score))
+                seen_ids.add(track_id)
+                break
+
     return matched[:limit]
 
 
@@ -200,6 +216,105 @@ async def _content_based_fallback(
     return [(tid, 1.0 - (i * 0.05)) for i, tid in enumerate(ids[:limit])]
 
 
+# Year window for "similar era" when no Last.fm (e.g. ±5 years)
+METADATA_YEAR_WINDOW = 5
+
+
+async def _metadata_based_similar(
+    db: AsyncSession,
+    exclude_track_id: int,
+    artist_id: int,
+    album_id: int,
+    album_year: int | None,
+    limit: int,
+) -> list[tuple[int, float]]:
+    """
+    Recommendations from metadata when Last.fm is not available.
+    Uses: same artist (other albums), similar release year, compilations featuring this artist.
+    Favours variety: different artists, different albums; caller caps per-artist (e.g. max 2).
+    Genre is not in the DB yet; could be added from file tags (e.g. TCON genre tag) later.
+    """
+    combined: dict[int, float] = {}
+
+    # 1) Same artist, other albums: up to half of limit, spread across albums (max 2 per album)
+    q_other_albums = (
+        select(Track.id, Track.album_id)
+        .where(
+            Track.artist_id == artist_id,
+            Track.album_id != album_id,
+            Track.id != exclude_track_id,
+        )
+        .order_by(Track.album_id, Track.disc_number, Track.track_number)
+    )
+    result = await db.execute(q_other_albums)
+    rows = result.all()
+    per_album: dict[int, list[int]] = defaultdict(list)
+    for tid, aid in rows:
+        per_album[aid].append(tid)
+    taken = 0
+    max_per_album = 2
+    target_same_artist = min(limit // 2, 15)
+    for aid in sorted(per_album.keys()):
+        if taken >= target_same_artist:
+            break
+        for tid in per_album[aid][:max_per_album]:
+            combined[tid] = 1.0
+            taken += 1
+            if taken >= target_same_artist:
+                break
+
+    # 2) Similar year: albums within ±METADATA_YEAR_WINDOW years (exclude seed album and seed artist for variety)
+    if album_year is not None:
+        year_lo = max(1900, album_year - METADATA_YEAR_WINDOW)
+        year_hi = album_year + METADATA_YEAR_WINDOW
+        q_year = (
+            select(Track.id, Track.artist_id, Album.year)
+            .join(Album, Track.album_id == Album.id)
+            .where(
+                Track.id != exclude_track_id,
+                Track.album_id != album_id,
+                Album.year >= year_lo,
+                Album.year <= year_hi,
+            )
+        )
+        result = await db.execute(q_year)
+        year_rows = result.all()
+        # Score by year proximity; we'll diversify by artist when building the final list
+        for tid, tid_artist_id, yr in year_rows:
+            if yr is None:
+                continue
+            dist = abs(yr - album_year)
+            score = 0.85 * (1.0 - min(dist / (METADATA_YEAR_WINDOW + 1), 1.0))
+            combined[tid] = max(combined.get(tid, 0), score)
+
+    # 3) Compilations that feature this artist: other tracks from those albums (any artist)
+    subq_album_artists = (
+        select(Track.album_id, func.count(func.distinct(Track.artist_id)).label("n_artists"))
+        .group_by(Track.album_id)
+    ).subquery()
+    subq_has_seed = (
+        select(Track.album_id)
+        .where(Track.artist_id == artist_id)
+        .distinct()
+    ).subquery()
+    q_comp = (
+        select(Track.id)
+        .join(subq_album_artists, Track.album_id == subq_album_artists.c.album_id)
+        .join(subq_has_seed, Track.album_id == subq_has_seed.c.album_id)
+        .where(
+            subq_album_artists.c.n_artists > 1,
+            Track.id != exclude_track_id,
+        )
+    )
+    result = await db.execute(q_comp)
+    for (tid,) in result.all():
+        combined[tid] = max(combined.get(tid, 0), 0.75)
+
+    # Sort by score and return; caller will diversify by artist
+    sorted_ids = sorted(combined.items(), key=lambda x: -x[1])[:limit * 3]
+    return sorted_ids
+
+
 async def get_similar_tracks(
     db: AsyncSession,
     track_id: int,
@@ -215,9 +330,9 @@ async def get_similar_tracks(
         from rompmusic_server.services.server_settings import get_api_keys
         api_keys = await get_api_keys(db)
         lastfm_api_key = api_keys.get("lastfm") or settings.lastfm_api_key
-    # Get seed track
+    # Get seed track and album year (for metadata-based fallback when no Last.fm)
     result = await db.execute(
-        select(Track, Artist.name)
+        select(Track, Artist.name, Album.year)
         .join(Album, Track.album_id == Album.id)
         .join(Artist, Track.artist_id == Artist.id)
         .where(Track.id == track_id)
@@ -225,7 +340,7 @@ async def get_similar_tracks(
     row = result.one_or_none()
     if not row:
         return []  # type: ignore
-    track, artist_name = row
+    track, artist_name, album_year = row
 
     combined: dict[int, float] = {}
 
@@ -234,21 +349,30 @@ async def get_similar_tracks(
         artist_name or "", track.title or "", limit=limit * 2, api_key=lastfm_api_key
     )
     lastfm_matched = await _match_lastfm_to_library(db, lastfm_similar, track_id, limit)
+    have_lastfm = len(lastfm_matched) > 0
     for tid, score in lastfm_matched:
         combined[tid] = combined.get(tid, 0) + score * 2.0
 
-    # 2. Collaborative filtering (weight 1.5 - our own data, very relevant)
-    cf_results = await _collaborative_filtering(db, track_id, user_id, limit)
-    for tid, score in cf_results:
-        combined[tid] = combined.get(tid, 0) + score * 1.5
+    # 2. Collaborative filtering - only use when we have Last.fm; otherwise co-play data adds unrelated artists
+    if have_lastfm:
+        cf_results = await _collaborative_filtering(db, track_id, user_id, limit)
+        for tid, score in cf_results:
+            combined[tid] = combined.get(tid, 0) + score * 1.5
 
-    # 3. Content-based fallback (weight 0.8 - same artist)
-    cb_results = await _content_based_fallback(db, track.artist_id, track_id, limit)
-    for tid, score in cb_results:
-        combined[tid] = combined.get(tid, 0) + score * 0.8
+    # 3. When no Last.fm: metadata-based (same artist other albums, similar year, compilations). Else content-based for variety.
+    if not have_lastfm:
+        meta_results = await _metadata_based_similar(
+            db, track_id, track.artist_id, track.album_id, album_year, limit
+        )
+        for tid, score in meta_results:
+            combined[tid] = combined.get(tid, 0) + score
+    else:
+        cb_results = await _content_based_fallback(db, track.artist_id, track_id, limit)
+        for tid, score in cb_results:
+            combined[tid] = combined.get(tid, 0) + score * 0.4
 
-    # Sort by blended score, take top limit
-    sorted_ids = sorted(combined.items(), key=lambda x: -x[1])[:limit]
+    # Sort by blended score, take more than limit so we can diversify
+    sorted_ids = sorted(combined.items(), key=lambda x: -x[1])[:limit * 3]
     if not sorted_ids:
         # Pure fallback: same artist
         cb = await _content_based_fallback(db, track.artist_id, track_id, limit)
@@ -268,7 +392,27 @@ async def get_similar_tracks(
     result = await db.execute(q)
     rows = result.all()
     by_id = {t.id: (t, at, an) for t, at, an in rows}
-    return [(by_id[tid][0], by_id[tid][1], by_id[tid][2]) for tid in track_ids if tid in by_id]
+
+    # Diversify: cap tracks per artist so we don't return only same-artist (max 2 per artist)
+    order_by_score = [tid for tid in track_ids if tid in by_id]
+    seen_per_artist: dict[int, int] = defaultdict(int)
+    diversified: list[int] = []
+    for tid in order_by_score:
+        t, _, _ = by_id[tid]
+        if seen_per_artist[t.artist_id] >= 2:
+            continue
+        seen_per_artist[t.artist_id] += 1
+        diversified.append(tid)
+        if len(diversified) >= limit:
+            break
+    # If we have too few (e.g. library is small), fill with remaining by score
+    for tid in order_by_score:
+        if len(diversified) >= limit:
+            break
+        if tid not in diversified:
+            diversified.append(tid)
+
+    return [(by_id[tid][0], by_id[tid][1], by_id[tid][2]) for tid in diversified if tid in by_id]
 
 
 async def get_recommended_tracks(
