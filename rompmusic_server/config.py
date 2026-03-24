@@ -57,5 +57,8 @@ class Settings(BaseSettings):
     # Recommendations: Last.fm API (optional; free key at last.fm/api/account/create)
     lastfm_api_key: str | None = None
 
+    # Optional: require this header value for GET /library/stats (when unset, only 127.0.0.1/::1 may call it)
+    metrics_library_stats_token: str | None = None
+
 
 settings = Settings()

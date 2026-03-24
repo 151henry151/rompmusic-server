@@ -78,6 +78,13 @@ class AlbumResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class LibraryStatsResponse(BaseModel):
+    """Album and track counts for monitoring (GET /library/stats)."""
+
+    albums: int
+    tracks: int
+
+
 class TrackResponse(BaseModel):
     id: int
     title: str

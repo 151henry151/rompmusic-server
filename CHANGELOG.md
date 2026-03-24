@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (Changes since last release will be listed here)
 
+## [0.1.13] - 2026-03-24
+
+### Added
+
+- Add GET /api/v1/library/stats returning album and track counts for Prometheus textfile collectors (localhost, or X-Rompmusic-Metrics-Token when METRICS_LIBRARY_STATS_TOKEN is set).
+
 ## [0.1.12] - 2026-03-21
 
 ### Added
