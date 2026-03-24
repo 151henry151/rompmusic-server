@@ -3,6 +3,8 @@
 
 """Library API routes - artists, albums, tracks."""
 
+from ipaddress import ip_address
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import and_, desc, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,18 +19,30 @@ from rompmusic_server.services.metadata_quality import is_home_quality_track
 router = APIRouter(prefix="/library", tags=["library"])
 
 
+def _library_stats_peer_allowed(host: str | None) -> bool:
+    """True for loopback and RFC1918/ULA (host → published Docker port appears as bridge IP, e.g. 172.17.0.1)."""
+    if not host:
+        return False
+    if host in ("127.0.0.1", "::1"):
+        return True
+    try:
+        return ip_address(host).is_private
+    except ValueError:
+        return False
+
+
 def _require_library_stats_access(request: Request) -> None:
-    """Allow /library/stats from localhost, or from any client if X-Rompmusic-Metrics-Token matches settings."""
+    """Allow /library/stats from private networks or token; see _library_stats_peer_allowed."""
     tok = (settings.metrics_library_stats_token or "").strip()
     if tok:
         if request.headers.get("X-Rompmusic-Metrics-Token") != tok:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or missing metrics token")
         return
     client = request.client
-    if not client or client.host not in ("127.0.0.1", "::1"):
+    if not client or not _library_stats_peer_allowed(client.host):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Library stats only available from localhost; set METRICS_LIBRARY_STATS_TOKEN to use a token",
+            detail="Library stats only from private networks or use METRICS_LIBRARY_STATS_TOKEN",
         )
 
 

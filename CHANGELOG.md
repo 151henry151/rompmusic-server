@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (Changes since last release will be listed here)
 
+## [0.1.14] - 2026-03-24
+
+### Changed
+
+- Allow GET /api/v1/library/stats from any RFC1918/ULA private client address when no metrics token is set (fixes host → Docker published port appearing as bridge IP, e.g. 172.17.0.1).
+
 ## [0.1.13] - 2026-03-24
 
 ### Added
