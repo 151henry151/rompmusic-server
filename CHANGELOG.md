@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (Changes since last release will be listed here)
 
+## [0.1.15] - 2026-03-28
+
+### Fixed
+
+- Call Starlette `Jinja2Templates.TemplateResponse` with `request` as the first argument in admin `views.py` so `/server` HTML routes return 200 under Starlette 1.x.
+
+### Added
+
+- Add `tests/test_admin_web.py` with a GET `/server` smoke test for the admin login HTML.
+
 ## [0.1.14] - 2026-03-24
 
 ### Changed

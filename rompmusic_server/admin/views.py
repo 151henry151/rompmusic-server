@@ -40,7 +40,7 @@ async def require_admin_user(
 @router.get("", response_class=HTMLResponse)
 async def admin_login_page(request: Request):
     """Admin login page."""
-    return templates.TemplateResponse("login.html", {"request": request})
+    return templates.TemplateResponse(request, "login.html")
 
 
 @router.post("/login", response_class=RedirectResponse)
@@ -83,9 +83,9 @@ async def admin_dashboard(
     users_count = await db.scalar(select(func.count()).select_from(User)) or 0
 
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
         {
-            "request": request,
             "user": user,
             "artists_count": artists_count,
             "albums_count": albums_count,
@@ -108,8 +108,9 @@ async def admin_trigger_scan(
     started = start_background_scan(request.app)
     state = _get_scan_state(request.app)
     return templates.TemplateResponse(
+        request,
         "partials/scan_result.html",
-        {"request": request, "counts": state, "started": started},
+        {"counts": state, "started": started},
     )
 
 
