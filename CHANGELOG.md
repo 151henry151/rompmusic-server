@@ -19,6 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (Changes since last release will be listed here)
 
+## [0.1.16] - 2026-08-11
+
+### Added
+
+- Add `normalize_release_year` and tests so placeholder album years serialize as null.
+- Add Alembic migration `0004_null_zero_album_years` that sets album `year <= 0` to NULL.
+
+### Changed
+
+- Parse scanner year tags through `_parse_year_tag` so `0` / `0000` are stored as missing.
+
+### Fixed
+
+- Return album and track `year` as null when the stored value is 0 or negative.
+
 ## [0.1.15] - 2026-03-28
 
 ### Fixed

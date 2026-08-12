@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from rompmusic_server.config import settings
 from rompmusic_server.models import Artist, Album, Track, PlayHistory, PlaylistTrack
+from rompmusic_server.release_year import normalize_release_year
 from rompmusic_server.services.artwork import artwork_hash_from_bytes, extract_artwork_from_file, has_artwork_in_file
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,17 @@ def _sanitize_text_for_db(s: str | None) -> str:
     # Strip other C0 control characters (except common whitespace)
     out = "".join(c for c in out if ord(c) >= 32 or c in "\t\n\r")
     return out.strip()
+
+
+
+def _parse_year_tag(year_str: str | None) -> int | None:
+    """Parse a tag year, treating 0/invalid values as missing."""
+    if not year_str:
+        return None
+    try:
+        return normalize_release_year(int(str(year_str)[:4]))
+    except (ValueError, TypeError):
+        return None
 
 
 def extract_metadata(file_path: Path) -> dict[str, Any] | None:
@@ -64,11 +76,7 @@ def extract_metadata(file_path: Path) -> dict[str, Any] | None:
                 tags, ["aART", "TPE2", "albumartist", "ALBUMARTIST", "ARTIST"]
             )
             year_str = _get_tag(tags, ["\xa9day", "TDRC", "date", "DATE"])
-            if year_str:
-                try:
-                    info["year"] = int(str(year_str)[:4])
-                except (ValueError, TypeError):
-                    pass
+            info["year"] = _parse_year_tag(year_str)
             tn = _get_tag(tags, ["trkn", "TRCK", "tracknumber", "TRACKNUMBER"])
             if tn:
                 try:

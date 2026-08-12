@@ -5,7 +5,9 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+from rompmusic_server.release_year import normalize_release_year
 
 
 # Auth
@@ -77,6 +79,11 @@ class AlbumResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @field_validator("year", mode="before")
+    @classmethod
+    def _normalize_year(cls, value: int | None) -> int | None:
+        return normalize_release_year(value)
+
 
 class LibraryStatsResponse(BaseModel):
     """Album and track counts for monitoring (GET /library/stats)."""
@@ -101,6 +108,11 @@ class TrackResponse(BaseModel):
     created_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("year", mode="before")
+    @classmethod
+    def _normalize_year(cls, value: int | None) -> int | None:
+        return normalize_release_year(value)
 
 
 # Playlist
